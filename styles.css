@@ -420,6 +420,13 @@ code {
   color: var(--text-soft);
 }
 
+.destination-card h3 {
+  font-size: 1.22rem;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  overflow-wrap: anywhere;
+}
+
 .destination-grid {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
@@ -467,6 +474,7 @@ code {
   white-space: normal;
   overflow-wrap: anywhere;
   text-align: left;
+  flex-shrink: 0;
 }
 
 .count-pill {
@@ -531,6 +539,11 @@ code {
   gap: 12px;
 }
 
+.parcel-item__top > div:first-child {
+  min-width: 0;
+  flex: 1;
+}
+
 .parcel-code {
   margin: 0;
   font-size: 1rem;
@@ -543,6 +556,7 @@ code {
   color: var(--text-soft);
   font-size: 0.9rem;
   line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 
 .move-group {
@@ -752,5 +766,11 @@ code {
   .brand-logo--transbaus,
   .brand-logo--gaviota {
     max-height: 42px;
+  }
+
+  .tag {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
   }
 }

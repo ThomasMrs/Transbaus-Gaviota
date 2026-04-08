@@ -95,7 +95,7 @@ function loadState() {
     const knownIds = new Set(baques.map((baque) => baque.id));
     const parcels = parsed.parcels
       .filter((parcel) => parcel && knownIds.has(parcel.currentBaqueId))
-      .map((parcel) => ({
+      .map((parcel) => normalizeParcelData({
         id: parcel.id || createId(),
         barcode: String(parcel.barcode || "").trim(),
         routeCode: String(parcel.routeCode || "").trim().toUpperCase(),
@@ -224,10 +224,11 @@ function renderDestinationSummary() {
 
       return `
         <article class="destination-card">
-          <h3>Destination ${escapeHtml(destination)}</h3>
+          <h3>${escapeHtml(destination)}</h3>
           <div class="destination-count">${escapeHtml(String(parcels.length))}</div>
           <div class="destination-card__meta">
             <span>${escapeHtml(pluralize(parcels.length, "colis", "colis"))}</span>
+            ${renderRouteCodeMeta(parcels)}
           </div>
           <div class="distribution-list">${chips}</div>
         </article>
@@ -305,6 +306,7 @@ function parcelTemplate(parcel) {
   ]
     .filter(Boolean)
     .join("<br>");
+  const tagLabel = parcel.routeCode || getDestinationShortLabel(parcel.destination) || "Colis";
 
   return `
     <article class="parcel-item" data-parcel-id="${escapeHtml(parcel.id)}">
@@ -313,7 +315,7 @@ function parcelTemplate(parcel) {
           <p class="parcel-code">${escapeHtml(parcel.barcode)}</p>
           <p class="parcel-meta">${detailLines}</p>
         </div>
-        <span class="tag">Destination ${escapeHtml(parcel.destination)}</span>
+        <span class="tag">${escapeHtml(tagLabel)}</span>
       </div>
 
       <div class="parcel-item__bottom">
@@ -622,8 +624,7 @@ function parseLabelText(text) {
     .map((line) => normalizeOcrLine(line))
     .filter(Boolean);
   const sections = extractLabelSections(lines);
-
-  return {
+  const parsed = {
     rawText: text,
     barcode: extractCommandeNumber(lines, text),
     routeCode: extractRouteCode(lines, text),
@@ -634,8 +635,10 @@ function parseLabelText(text) {
     reference: sections.reference,
     shippingDate: extractShippingDate(text),
     weight: extractWeight(text),
-    packageIndex: extractPackageIndex(text),
+    packageIndex: extractPackageIndex(lines, text),
   };
+
+  return normalizeParcelData(parsed);
 }
 
 function extractLabelSections(lines) {
@@ -715,18 +718,23 @@ function looksLikeMetaLine(line) {
 }
 
 function extractCommandeNumber(lines, text) {
-  const directMatch = text.match(/(?:N\W*COMMANDE|COMMANDE)\W*([A-Z0-9]{5,})/i);
-  if (directMatch) {
-    return directMatch[1].replace(/\s+/g, "");
-  }
-
   const commandIndex = lines.findIndex((line) => /COMMANDE/i.test(line));
   if (commandIndex >= 0) {
-    const nextLine = lines[commandIndex + 1] || "";
-    const fallbackMatch = nextLine.match(/[A-Z0-9]{5,}/i);
-    if (fallbackMatch) {
-      return fallbackMatch[0].replace(/\s+/g, "");
+    const candidates = lines
+      .slice(commandIndex, commandIndex + 4)
+      .flatMap((line) => [...line.matchAll(/\b\d{5,10}\b/g)].map((match) => match[0]))
+      .filter((value, index, array) => array.indexOf(value) === index)
+      .sort((left, right) => left.length - right.length);
+
+    const preferred = candidates.find((value) => value.length >= 5 && value.length <= 8);
+    if (preferred) {
+      return preferred;
     }
+  }
+
+  const directMatch = text.match(/(?:N\W*COMMANDE|COMMANDE)[^\dA-Z]*([0-9]{5,10})/i);
+  if (directMatch) {
+    return directMatch[1].replace(/\s+/g, "");
   }
 
   return "";
@@ -749,7 +757,7 @@ function extractDestination(lines, sections) {
   }
 
   const postalLine = lines.find((line) => /\b\d{5}\b/.test(line) && !/SALEILLES/i.test(line));
-  return postalLine ? normalizeFreeText(postalLine) : "";
+  return postalLine ? sanitizeDestination(postalLine) : "";
 }
 
 function extractShippingDate(text) {
@@ -762,8 +770,13 @@ function extractWeight(text) {
   return match ? normalizeFreeText(match[0].replace(/\s+/g, " ")) : "";
 }
 
-function extractPackageIndex(text) {
-  const match = text.match(/\b\d+\s*\/\s*\d+\b/);
+function extractPackageIndex(lines, text) {
+  const lineMatch = lines.find((line) => /^\d{1,2}\s*\/\s*\d{1,2}$/.test(line));
+  if (lineMatch) {
+    return lineMatch.replace(/\s+/g, "");
+  }
+
+  const match = text.match(/\b\d{1,2}\s*\/\s*\d{1,2}\b(?!\s*\/)/);
   return match ? match[0].replace(/\s+/g, "") : "";
 }
 
@@ -792,8 +805,20 @@ function upsertParcel(scannedBarcode = "") {
   const weight = normalizeFreeText(ui.weightInput.value);
   const packageIndex = normalizeFreeText(ui.packageIndexInput.value);
   const barcode = normalizeBarcode(scannedBarcode || ui.barcodeInput.value);
+  const normalizedParcelData = normalizeParcelData({
+    barcode,
+    routeCode,
+    destination,
+    client,
+    description,
+    routeLabel,
+    reference,
+    shippingDate,
+    weight,
+    packageIndex,
+  });
 
-  if (!baqueId || !destination || !barcode) {
+  if (!baqueId || !normalizedParcelData.destination || !normalizedParcelData.barcode) {
     showToast("Choisissez une baque, une destination et un code-barres.", "danger");
     return false;
   }
@@ -805,19 +830,19 @@ function upsertParcel(scannedBarcode = "") {
   }
 
   const now = new Date().toISOString();
-  const existing = state.parcels.find((parcel) => parcel.barcode === barcode);
+  const existing = state.parcels.find((parcel) => parcel.barcode === normalizedParcelData.barcode);
 
   if (existing) {
     const moved = existing.currentBaqueId !== baqueId;
-    existing.routeCode = routeCode;
-    existing.destination = destination;
-    existing.client = client;
-    existing.description = description;
-    existing.routeLabel = routeLabel;
-    existing.reference = reference;
-    existing.shippingDate = shippingDate;
-    existing.weight = weight;
-    existing.packageIndex = packageIndex;
+    existing.routeCode = normalizedParcelData.routeCode;
+    existing.destination = normalizedParcelData.destination;
+    existing.client = normalizedParcelData.client;
+    existing.description = normalizedParcelData.description;
+    existing.routeLabel = normalizedParcelData.routeLabel;
+    existing.reference = normalizedParcelData.reference;
+    existing.shippingDate = normalizedParcelData.shippingDate;
+    existing.weight = normalizedParcelData.weight;
+    existing.packageIndex = normalizedParcelData.packageIndex;
     existing.currentBaqueId = baqueId;
     existing.updatedAt = now;
 
@@ -826,24 +851,24 @@ function upsertParcel(scannedBarcode = "") {
     clearParcelForm();
     showToast(
       moved
-        ? `Colis ${barcode} deplace vers ${baque.name}.`
-        : `Colis ${barcode} mis a jour.`,
+        ? `Colis ${normalizedParcelData.barcode} deplace vers ${baque.name}.`
+        : `Colis ${normalizedParcelData.barcode} mis a jour.`,
     );
     return true;
   }
 
   state.parcels.unshift({
     id: createId(),
-    barcode,
-    routeCode,
-    destination,
-    client,
-    description,
-    routeLabel,
-    reference,
-    shippingDate,
-    weight,
-    packageIndex,
+    barcode: normalizedParcelData.barcode,
+    routeCode: normalizedParcelData.routeCode,
+    destination: normalizedParcelData.destination,
+    client: normalizedParcelData.client,
+    description: normalizedParcelData.description,
+    routeLabel: normalizedParcelData.routeLabel,
+    reference: normalizedParcelData.reference,
+    shippingDate: normalizedParcelData.shippingDate,
+    weight: normalizedParcelData.weight,
+    packageIndex: normalizedParcelData.packageIndex,
     currentBaqueId: baqueId,
     originBaqueId: baqueId,
     originBaqueLabel: baque.name,
@@ -854,7 +879,7 @@ function upsertParcel(scannedBarcode = "") {
   saveState();
   render();
   clearParcelForm();
-  showToast(`Colis ${barcode} ajoute dans ${baque.name}.`);
+  showToast(`Colis ${normalizedParcelData.barcode} ajoute dans ${baque.name}.`);
   return true;
 }
 
@@ -1074,7 +1099,7 @@ function createId() {
 }
 
 function normalizeDestination(value) {
-  return normalizeFreeText(value);
+  return sanitizeDestination(value);
 }
 
 function normalizeRouteCode(value) {
@@ -1083,6 +1108,125 @@ function normalizeRouteCode(value) {
 
 function normalizeFreeText(value) {
   return value.trim().replace(/\s+/g, " ");
+}
+
+function normalizeParcelData(parcel) {
+  const barcode = normalizeBarcode(parcel.barcode || "");
+  const routeLabel = normalizeFreeText(parcel.routeLabel || "");
+  const destination = sanitizeDestination(parcel.destination || "");
+  const shippingDate = normalizeFreeText(parcel.shippingDate || "");
+  const routeCode = reconcileRouteCode(parcel.routeCode || "", routeLabel, destination);
+  const packageIndex = sanitizePackageIndex(parcel.packageIndex || "", shippingDate);
+
+  return {
+    ...parcel,
+    barcode,
+    routeCode,
+    destination,
+    client: normalizeFreeText(parcel.client || ""),
+    description: normalizeFreeText(parcel.description || ""),
+    routeLabel,
+    reference: normalizeFreeText(parcel.reference || ""),
+    shippingDate,
+    weight: normalizeFreeText(parcel.weight || ""),
+    packageIndex,
+  };
+}
+
+function sanitizeDestination(value) {
+  const rawSegments = String(value)
+    .replaceAll(",", "\n")
+    .split("\n")
+    .map((segment) => normalizeFreeText(segment))
+    .filter(Boolean);
+
+  const cleanedSegments = rawSegments
+    .map((segment) => cleanDestinationSegment(segment))
+    .filter(Boolean);
+
+  const postalIndex = cleanedSegments.findIndex((segment) => /\b\d{5}\b/.test(segment));
+  const keptSegments = postalIndex >= 0 ? cleanedSegments.slice(postalIndex) : cleanedSegments;
+
+  return normalizeFreeText(keptSegments.join(" "));
+}
+
+function cleanDestinationSegment(segment) {
+  let nextSegment = normalizeFreeText(segment);
+  const postalMatch = nextSegment.match(/\b\d{5}\b/);
+  if (postalMatch) {
+    nextSegment = nextSegment.slice(postalMatch.index).trim();
+  }
+
+  nextSegment = nextSegment
+    .replace(/^[^0-9A-ZÀ-ÿ-]+/u, "")
+    .replace(/\b[Il|]{1,3}\b/g, "")
+    .replace(/\s+\d{1,2}$/u, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  if (!nextSegment) {
+    return "";
+  }
+
+  if (/^\d+$/.test(nextSegment) || /^[Il|]+$/i.test(nextSegment)) {
+    return "";
+  }
+
+  return nextSegment;
+}
+
+function sanitizePackageIndex(packageIndex, shippingDate) {
+  const normalized = normalizeFreeText(packageIndex).replace(/\s+/g, "");
+  if (!normalized) {
+    return "";
+  }
+
+  if (!/^\d{1,2}\/\d{1,2}$/.test(normalized)) {
+    return "";
+  }
+
+  const datePrefix = shippingDate.match(/^(\d{2}\/\d{2})\//)?.[1];
+  if (datePrefix && normalized === datePrefix) {
+    return "";
+  }
+
+  return normalized;
+}
+
+function reconcileRouteCode(routeCode, routeLabel, destination) {
+  const normalizedRouteCode = normalizeRouteCode(routeCode || "");
+  const postalCode = extractPostalCode(destination);
+  const routePrefix = routeLabel.match(/\bR\d+\b/i)?.[0]?.toUpperCase() || "";
+  const derivedRouteCode = routePrefix && postalCode ? `${routePrefix}${postalCode}` : "";
+
+  if (!normalizedRouteCode) {
+    return derivedRouteCode;
+  }
+
+  if (postalCode && !normalizedRouteCode.endsWith(postalCode) && derivedRouteCode) {
+    return derivedRouteCode;
+  }
+
+  return normalizedRouteCode;
+}
+
+function extractPostalCode(destination) {
+  return String(destination).match(/\b\d{5}\b/)?.[0] || "";
+}
+
+function getDestinationShortLabel(destination) {
+  const cleaned = sanitizeDestination(destination);
+  const match = cleaned.match(/\b\d{5}\s+[A-ZÀ-ÿ-]+(?:\s+[A-ZÀ-ÿ-]+){0,2}/u);
+  return match ? normalizeFreeText(match[0]) : cleaned;
+}
+
+function renderRouteCodeMeta(parcels) {
+  const routeCodes = [...new Set(parcels.map((parcel) => parcel.routeCode).filter(Boolean))];
+  if (routeCodes.length !== 1) {
+    return "";
+  }
+
+  return `<span><strong>Route :</strong> ${escapeHtml(routeCodes[0])}</span>`;
 }
 
 function normalizeBarcode(value) {
