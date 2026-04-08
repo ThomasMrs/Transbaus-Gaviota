@@ -53,18 +53,33 @@
         <div id="heroStats" class="hero__stats"></div>
       </div>
 
-      <aside class="panel panel--highlight">
-        <div class="hero__side-label">Flux recommande</div>
-        <ol class="flow-list">
-          <li>Choisir la baque actuelle du colis.</li>
-          <li>Choisir une photo existante ou prendre une photo de l'etiquette.</li>
-          <li>Verifier au minimum le numero destination, puis enregistrer le colis.</li>
-          <li>Deplacer, rechercher ou supprimer le colis quand son emplacement change.</li>
-        </ol>
-        <p class="hero__side-note">
-          Si l'OCR ne lit pas tout du premier coup, reprenez une photo bien droite,
-          nette et serree sur l'etiquette.
-        </p>
+      <aside class="panel panel--highlight panel--collapsible" data-collapsible-key="flow">
+        <div class="hero__side-head">
+          <div class="hero__side-label">Flux recommande</div>
+          <button
+            class="collapse-toggle"
+            type="button"
+            data-collapse-toggle
+            data-collapse-key="flow"
+            aria-expanded="true"
+            aria-label="Reduire la rubrique"
+            aria-controls="flowPanelBody"
+          >
+            -
+          </button>
+        </div>
+        <div id="flowPanelBody" class="collapsible-body">
+          <ol class="flow-list">
+            <li>Choisir la baque actuelle du colis.</li>
+            <li>Choisir une photo existante ou prendre une photo de l'etiquette.</li>
+            <li>Verifier au minimum le numero destination, puis enregistrer le colis.</li>
+            <li>Deplacer, rechercher ou supprimer le colis quand son emplacement change.</li>
+          </ol>
+          <p class="hero__side-note">
+            Si l'OCR ne lit pas tout du premier coup, reprenez une photo bien droite,
+            nette et serree sur l'etiquette.
+          </p>
+        </div>
       </aside>
     </header>
 
@@ -84,9 +99,10 @@
                 data-collapse-toggle
                 data-collapse-key="scanner"
                 aria-expanded="true"
+                aria-label="Reduire la rubrique"
                 aria-controls="scannerPanelBody"
               >
-                Reduire
+                -
               </button>
             </div>
           </div>
@@ -294,9 +310,10 @@
               data-collapse-toggle
               data-collapse-key="baqueForm"
               aria-expanded="true"
+              aria-label="Reduire la rubrique"
               aria-controls="baquePanelBody"
             >
-              Reduire
+              -
             </button>
           </div>
 
@@ -339,9 +356,10 @@
               data-collapse-toggle
               data-collapse-key="search"
               aria-expanded="true"
+              aria-label="Reduire la rubrique"
               aria-controls="searchPanelBody"
             >
-              Reduire
+              -
             </button>
           </div>
 
@@ -373,9 +391,10 @@
                 data-collapse-toggle
                 data-collapse-key="deliveryNote"
                 aria-expanded="true"
+                aria-label="Reduire la rubrique"
                 aria-controls="deliveryNotePanelBody"
               >
-                Reduire
+                -
               </button>
             </div>
           </div>
@@ -416,9 +435,10 @@
             data-collapse-toggle
             data-collapse-key="destinations"
             aria-expanded="true"
+            aria-label="Reduire la rubrique"
             aria-controls="destinationsSectionBody"
           >
-            Reduire
+            -
           </button>
         </div>
 
@@ -442,9 +462,10 @@
             data-collapse-toggle
             data-collapse-key="baques"
             aria-expanded="true"
+            aria-label="Reduire la rubrique"
             aria-controls="baquesSectionBody"
           >
-            Reduire
+            -
           </button>
         </div>
 

@@ -226,6 +226,18 @@ code {
   border: 1px solid rgba(36, 78, 115, 0.08);
 }
 
+.hero__side-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.hero__side-head .hero__side-label {
+  margin-bottom: 0;
+}
+
 .content {
   margin-top: 24px;
 }
@@ -285,12 +297,18 @@ code {
   display: none;
   align-items: center;
   justify-content: center;
-  padding: 9px 14px;
+  min-width: 36px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   border: 1px solid rgba(36, 78, 115, 0.1);
   border-radius: 999px;
   background: rgba(36, 78, 115, 0.06);
   color: var(--primary-deep);
   font-weight: 800;
+  font-size: 1.2rem;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 .collapsible-body[hidden] {
@@ -930,7 +948,21 @@ code {
     display: inline-flex;
   }
 
+  .panel--collapsible > .section-head,
+  .section-block--collapsible > .section-head,
+  .panel--highlight.panel--collapsible > .hero__side-head {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .panel--collapsible > .section-head .section-head__actions {
+    flex-direction: row;
+    align-items: center;
+    margin-left: auto;
+  }
+
   .panel--collapsible.is-collapsed .section-head,
+  .panel--collapsible.is-collapsed .hero__side-head,
   .section-block--collapsible.is-collapsed .section-head {
     margin-bottom: 0;
   }
@@ -949,6 +981,7 @@ code {
 
   .section-head,
   .section-head__actions,
+  .hero__side-head,
   .baque-card__meta,
   .parcel-item__top,
   .parcel-item__bottom,
@@ -961,10 +994,6 @@ code {
 
   .btn,
   .icon-btn {
-    width: 100%;
-  }
-
-  .collapse-toggle {
     width: 100%;
   }
 

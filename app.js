@@ -3,6 +3,7 @@ const COLLAPSE_STORAGE_KEY = "le-baus-du-tri-collapse-v1";
 const PDF_DB_NAME = "le-baus-du-tri-documents-v1";
 const PDF_STORE_NAME = "delivery-notes";
 const DEFAULT_COLLAPSE_STATE = {
+  flow: true,
   scanner: false,
   baqueForm: true,
   search: true,
@@ -671,8 +672,10 @@ function applyCollapseStateToDom() {
     section.classList.toggle("is-collapsed", shouldCollapse);
 
     if (toggle instanceof HTMLButtonElement) {
-      toggle.textContent = shouldCollapse ? "Ouvrir" : "Reduire";
+      toggle.textContent = shouldCollapse ? "+" : "-";
       toggle.setAttribute("aria-expanded", String(!shouldCollapse));
+      toggle.setAttribute("aria-label", shouldCollapse ? "Ouvrir la rubrique" : "Reduire la rubrique");
+      toggle.title = shouldCollapse ? "Ouvrir la rubrique" : "Reduire la rubrique";
     }
 
     if (body instanceof HTMLElement) {
