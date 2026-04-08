@@ -22,7 +22,38 @@
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
   <script src="app.js" defer></script>
 </head>
-<body>
+<body class="app-locked">
+  <div id="loginGate" class="login-gate" aria-hidden="false">
+    <div class="login-gate__backdrop"></div>
+    <section class="login-panel" aria-labelledby="loginTitle">
+      <p class="eyebrow">Acces site</p>
+      <h1 id="loginTitle">Entrer le code</h1>
+      <p class="login-panel__lead">
+        Entrez le code pour afficher l'application.
+      </p>
+
+      <form id="loginForm" class="form-stack">
+        <label class="field">
+          <span>Code d'acces</span>
+          <input
+            id="loginPasswordInput"
+            type="password"
+            inputmode="numeric"
+            autocomplete="current-password"
+            placeholder="Entrez le code"
+            required
+          >
+        </label>
+
+        <p id="loginStatus" class="field-help"></p>
+
+        <button class="btn btn--primary" type="submit">
+          Entrer
+        </button>
+      </form>
+    </section>
+  </div>
+
   <div class="page-shell">
     <section class="brand-bar" aria-label="Marques">
       <div class="brand-mark brand-mark--transbaus">
@@ -40,6 +71,10 @@
           alt="Gaviota"
         >
       </div>
+
+      <button id="logoutBtn" class="btn btn--secondary brand-bar__logout" type="button">
+        Verrouiller
+      </button>
     </section>
 
     <header class="hero">

@@ -1,5 +1,7 @@
 const STORAGE_KEY = "transbaus-gaviota-state-v1";
 const COLLAPSE_STORAGE_KEY = "le-baus-du-tri-collapse-v1";
+const ACCESS_STORAGE_KEY = "transbaus-gaviota-access-v1";
+const ACCESS_PASSWORD = "2005";
 const PDF_DB_NAME = "le-baus-du-tri-documents-v1";
 const PDF_STORE_NAME = "delivery-notes";
 const PDFJS_VERSION = "5.6.205";
@@ -48,9 +50,15 @@ document.addEventListener("DOMContentLoaded", () => {
   cacheElements();
   bindEvents();
   render();
+  syncAccessGate();
 });
 
 function cacheElements() {
+  ui.loginGate = document.querySelector("#loginGate");
+  ui.loginForm = document.querySelector("#loginForm");
+  ui.loginPasswordInput = document.querySelector("#loginPasswordInput");
+  ui.loginStatus = document.querySelector("#loginStatus");
+  ui.logoutBtn = document.querySelector("#logoutBtn");
   ui.heroStats = document.querySelector("#heroStats");
   ui.parcelForm = document.querySelector("#parcelForm");
   ui.parcelBaqueSelect = document.querySelector("#parcelBaqueSelect");
@@ -104,6 +112,8 @@ function cacheElements() {
 
 function bindEvents() {
   document.addEventListener("click", handleCollapseToggle);
+  ui.loginForm.addEventListener("submit", handleLoginSubmit);
+  ui.logoutBtn.addEventListener("click", handleLogoutClick);
   ui.parcelForm.addEventListener("submit", handleParcelSubmit);
   ui.baqueForm.addEventListener("submit", handleBaqueSubmit);
   ui.searchInput.addEventListener("input", renderSearchResults);
@@ -136,6 +146,53 @@ function bindEvents() {
     void stopOcrWorker();
   });
   window.addEventListener("resize", applyCollapseStateToDom);
+}
+
+function syncAccessGate() {
+  setAppAccess(hasStoredAccess());
+}
+
+function handleLoginSubmit(event) {
+  event.preventDefault();
+
+  const typedPassword = ui.loginPasswordInput.value.trim();
+  if (typedPassword !== ACCESS_PASSWORD) {
+    ui.loginStatus.textContent = "Code incorrect.";
+    ui.loginPasswordInput.focus();
+    ui.loginPasswordInput.select();
+    return;
+  }
+
+  window.localStorage.setItem(ACCESS_STORAGE_KEY, "granted");
+  ui.loginStatus.textContent = "";
+  ui.loginForm.reset();
+  setAppAccess(true);
+}
+
+function handleLogoutClick() {
+  window.localStorage.removeItem(ACCESS_STORAGE_KEY);
+  void closeScanner();
+  void closeCaptureModal();
+  setAppAccess(false);
+}
+
+function hasStoredAccess() {
+  return window.localStorage.getItem(ACCESS_STORAGE_KEY) === "granted";
+}
+
+function setAppAccess(isGranted) {
+  document.body.classList.toggle("app-locked", !isGranted);
+  ui.loginGate.setAttribute("aria-hidden", String(isGranted));
+  ui.logoutBtn.hidden = !isGranted;
+
+  if (!isGranted) {
+    ui.loginForm.reset();
+    ui.loginStatus.textContent = "";
+    ui.loginPasswordInput.focus();
+    return;
+  }
+
+  ui.routeCodeInput.focus();
 }
 
 function loadState() {
