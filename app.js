@@ -544,9 +544,10 @@ function deliveryNoteTemplate(note) {
   const summary = analysis
     ? `
       <div class="document-summary">
-        <span class="distribution-chip">Livraisons : ${escapeHtml(String(analysis.totalEntries))}</span>
-        <span class="distribution-chip">Enregistrees : ${escapeHtml(String(analysis.matchedCount))}</span>
-        <span class="distribution-chip distribution-chip--alert">Manquantes : ${escapeHtml(String(analysis.missingCount))}</span>
+        <span class="distribution-chip">Lignes : ${escapeHtml(String(analysis.totalEntries))}</span>
+        <span class="distribution-chip">Attendus : ${escapeHtml(String(analysis.totalExpectedCount))}</span>
+        <span class="distribution-chip">Enregistres : ${escapeHtml(String(analysis.totalRegisteredCount))}</span>
+        <span class="distribution-chip distribution-chip--alert">Manquants : ${escapeHtml(String(analysis.totalMissingCount))}</span>
       </div>
       ${analysis.parseError
         ? `<p class="field-help">${escapeHtml(analysis.parseError)}</p>`
@@ -558,6 +559,8 @@ function deliveryNoteTemplate(note) {
               ${analysis.missingEntries.map((entry) => `
                 <article class="document-missing__item">
                   <strong>${escapeHtml(entry.commandNumber)}</strong>
+                  <span>${escapeHtml(String(entry.registeredCount))} / ${escapeHtml(String(entry.expectedCount))} enregistres</span>
+                  <span>${escapeHtml(String(entry.missingCount))} colis manquant${entry.missingCount > 1 ? "s" : ""}</span>
                   ${entry.client ? `<span>${escapeHtml(entry.client)}</span>` : ""}
                   ${entry.city ? `<span>${escapeHtml(entry.city)}</span>` : ""}
                 </article>
@@ -874,8 +877,8 @@ async function analyzeDeliveryNote(noteId, providedFile = null) {
 
     saveState();
     renderDeliveryNotes();
-    ui.deliveryNoteStatus.textContent = analysis.missingCount
-      ? `${analysis.missingCount} colis manquants identifies dans ${deliveryNote.name}.`
+    ui.deliveryNoteStatus.textContent = analysis.totalMissingCount
+      ? `${analysis.totalMissingCount} colis manquants identifies dans ${deliveryNote.name}.`
       : analysis.parseError
       ? `Analyse terminee, mais aucune livraison exploitable n'a ete detectee dans ${deliveryNote.name}.`
       : `Aucun colis manquant detecte dans ${deliveryNote.name}.`;
@@ -1277,8 +1280,10 @@ function parseDeliveryNoteText(text) {
 
     const contextLines = lines.slice(Math.max(0, index - 6), Math.min(lines.length, index + 6));
     const commandNumber = resolveDeliveryCommandNumber(rawCommandNumber, contextLines);
+    const expectedCount = extractDeliveryPackageCount(contextLines, index - Math.max(0, index - 6));
     entries.push({
       commandNumber,
+      expectedCount,
       client: extractDeliveryClient(contextLines),
       city: extractDeliveryCity(contextLines),
       rawContext: contextLines.join(" | "),
@@ -1292,20 +1297,43 @@ function compareDeliveryNoteEntries(entries) {
   if (!entries.length) {
     return {
       totalEntries: 0,
-      matchedCount: 0,
-      missingCount: 0,
+      totalExpectedCount: 0,
+      totalRegisteredCount: 0,
+      totalMissingCount: 0,
       missingEntries: [],
       parseError: "Aucune livraison exploitable n'a ete detectee dans ce PDF. Le scan est peut-etre trop flou.",
     };
   }
 
-  const registeredCommands = buildRegisteredCommandSet();
-  const missingEntries = entries.filter((entry) => !registeredCommands.has(entry.commandNumber));
+  const registeredCommandCounts = buildRegisteredCommandCounts();
+  const missingEntries = [];
+  let totalExpectedCount = 0;
+  let totalRegisteredCount = 0;
+
+  entries.forEach((entry) => {
+    const expectedCount = Math.max(1, Number(entry.expectedCount || 1));
+    const registeredCount = registeredCommandCounts.get(entry.commandNumber) || 0;
+    const matchedCount = Math.min(expectedCount, registeredCount);
+    const missingCount = Math.max(0, expectedCount - registeredCount);
+
+    totalExpectedCount += expectedCount;
+    totalRegisteredCount += matchedCount;
+
+    if (missingCount > 0) {
+      missingEntries.push({
+        ...entry,
+        expectedCount,
+        registeredCount,
+        missingCount,
+      });
+    }
+  });
 
   return {
     totalEntries: entries.length,
-    matchedCount: entries.length - missingEntries.length,
-    missingCount: missingEntries.length,
+    totalExpectedCount,
+    totalRegisteredCount,
+    totalMissingCount: Math.max(0, totalExpectedCount - totalRegisteredCount),
     missingEntries,
     parseError: "",
   };
@@ -1655,9 +1683,7 @@ function upsertParcel(scannedBarcode = "") {
   }
 
   const now = new Date().toISOString();
-  const existing = normalizedParcelData.barcode
-    ? state.parcels.find((parcel) => parcel.barcode === normalizedParcelData.barcode)
-    : null;
+  const existing = findExistingParcel(normalizedParcelData);
 
   if (existing) {
     const moved = existing.currentBaqueId !== baqueId;
@@ -1975,6 +2001,30 @@ function getParcelIdentifier(parcel) {
   return parcel.barcode || formatRouteCodeForDisplay(parcel.routeCode) || "Sans code-barres";
 }
 
+function findExistingParcel(parcelData) {
+  const barcode = normalizeBarcode(parcelData.barcode || "");
+  const routeCode = normalizeRouteCode(parcelData.routeCode || "");
+  const packageIndex = normalizeFreeText(parcelData.packageIndex || "");
+
+  if (barcode && packageIndex) {
+    return state.parcels.find((parcel) => parcel.barcode === barcode && parcel.packageIndex === packageIndex) || null;
+  }
+
+  if (barcode) {
+    return state.parcels.find((parcel) => parcel.barcode === barcode && (!parcel.packageIndex || !packageIndex)) || null;
+  }
+
+  if (routeCode && packageIndex) {
+    return state.parcels.find((parcel) => parcel.routeCode === routeCode && parcel.packageIndex === packageIndex) || null;
+  }
+
+  if (routeCode) {
+    return state.parcels.find((parcel) => parcel.routeCode === routeCode && !parcel.packageIndex) || null;
+  }
+
+  return null;
+}
+
 function sanitizeDestination(value) {
   const rawSegments = String(value)
     .replaceAll(",", "\n")
@@ -2122,12 +2172,16 @@ function normalizeDeliveryNoteAnalysis(analysis) {
 
   return {
     totalEntries: Number(analysis.totalEntries || 0),
-    matchedCount: Number(analysis.matchedCount || 0),
-    missingCount: Number(analysis.missingCount || 0),
+    totalExpectedCount: Number(analysis.totalExpectedCount || 0),
+    totalRegisteredCount: Number(analysis.totalRegisteredCount || 0),
+    totalMissingCount: Number(analysis.totalMissingCount || 0),
     parseError: normalizeFreeText(analysis.parseError || ""),
     missingEntries: analysis.missingEntries
       .map((entry) => ({
         commandNumber: normalizeBarcode(entry.commandNumber || ""),
+        expectedCount: Number(entry.expectedCount || 1),
+        registeredCount: Number(entry.registeredCount || 0),
+        missingCount: Number(entry.missingCount || 0),
         client: normalizeFreeText(entry.client || ""),
         city: normalizeFreeText(entry.city || ""),
         rawContext: normalizeFreeText(entry.rawContext || ""),
@@ -2428,6 +2482,65 @@ function extractDeliveryCity(lines) {
   return "";
 }
 
+function extractDeliveryPackageCount(lines, commandIndex) {
+  const candidates = [];
+
+  lines.forEach((line, index) => {
+    const normalizedLine = normalizeFreeText(line.replace(/\bO,00\b/gi, "0,00"));
+    const decimalMatches = [...normalizedLine.matchAll(/\b([1-9]\d?)[,.]0{1,2}\b/g)];
+    decimalMatches.forEach((match) => {
+      candidates.push({
+        count: Number.parseInt(match[1], 10),
+        line: normalizedLine,
+        index,
+        source: "decimal",
+      });
+    });
+
+    if (/\d{2}\/\d{2}\/\d{4}/.test(normalizedLine)) {
+      const compactMatches = [...normalizedLine.matchAll(/\b([1-9]\d?)00\b/g)];
+      compactMatches.forEach((match) => {
+        candidates.push({
+          count: Number.parseInt(match[1], 10),
+          line: normalizedLine,
+          index,
+          source: "compact",
+        });
+      });
+    }
+  });
+
+  const bestCandidate = candidates
+    .filter((candidate) => candidate.count > 0 && candidate.count < 20)
+    .sort((left, right) => getDeliveryPackageCountScore(right, commandIndex) - getDeliveryPackageCountScore(left, commandIndex))[0];
+
+  return bestCandidate?.count || 1;
+}
+
+function getDeliveryPackageCountScore(candidate, commandIndex) {
+  let score = 0;
+  const line = candidate.line || "";
+
+  if (/COLIS/i.test(line)) {
+    score += 20;
+  }
+
+  if (/\d{2}\/\d{2}\/\d{4}/.test(line)) {
+    score += 16;
+  }
+
+  if (/POIDS|KG|\bX\b/i.test(line)) {
+    score -= 18;
+  }
+
+  if (candidate.source === "decimal") {
+    score += 12;
+  }
+
+  score -= Math.abs(candidate.index - commandIndex) * 4;
+  return score;
+}
+
 function dedupeDeliveryEntries(entries) {
   const seen = new Set();
 
@@ -2447,6 +2560,18 @@ function buildRegisteredCommandSet() {
       .map((parcel) => normalizeBarcode(parcel.barcode || ""))
       .filter((barcode) => /^\d{5,10}$/.test(barcode)),
   );
+}
+
+function buildRegisteredCommandCounts() {
+  return state.parcels.reduce((map, parcel) => {
+    const barcode = normalizeBarcode(parcel.barcode || "");
+    if (!/^\d{5,10}$/.test(barcode)) {
+      return map;
+    }
+
+    map.set(barcode, (map.get(barcode) || 0) + 1);
+    return map;
+  }, new Map());
 }
 
 function looksLikeDeliveryDate(value) {
