@@ -248,6 +248,14 @@ code {
   margin-bottom: 18px;
 }
 
+.section-head__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+
 .section-head h2 {
   font-size: 1.35rem;
   letter-spacing: -0.04em;
@@ -271,6 +279,28 @@ code {
   color: var(--primary-deep);
   font-size: 0.83rem;
   font-weight: 800;
+}
+
+.collapse-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 14px;
+  border: 1px solid rgba(36, 78, 115, 0.1);
+  border-radius: 999px;
+  background: rgba(36, 78, 115, 0.06);
+  color: var(--primary-deep);
+  font-weight: 800;
+}
+
+.collapsible-body[hidden] {
+  display: none !important;
+}
+
+.panel--collapsible .collapsible-body,
+.section-block--collapsible .collapsible-body {
+  display: grid;
+  gap: 16px;
 }
 
 .form-stack {
@@ -896,6 +926,15 @@ code {
     grid-template-columns: 1fr;
   }
 
+  .collapse-toggle {
+    display: inline-flex;
+  }
+
+  .panel--collapsible.is-collapsed .section-head,
+  .section-block--collapsible.is-collapsed .section-head {
+    margin-bottom: 0;
+  }
+
   .field-grid {
     grid-template-columns: 1fr;
   }
@@ -909,6 +948,7 @@ code {
   }
 
   .section-head,
+  .section-head__actions,
   .baque-card__meta,
   .parcel-item__top,
   .parcel-item__bottom,
@@ -921,6 +961,10 @@ code {
 
   .btn,
   .icon-btn {
+    width: 100%;
+  }
+
+  .collapse-toggle {
     width: 100%;
   }
 

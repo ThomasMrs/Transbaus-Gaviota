@@ -1,6 +1,15 @@
 const STORAGE_KEY = "transbaus-gaviota-state-v1";
+const COLLAPSE_STORAGE_KEY = "le-baus-du-tri-collapse-v1";
 const PDF_DB_NAME = "le-baus-du-tri-documents-v1";
 const PDF_STORE_NAME = "delivery-notes";
+const DEFAULT_COLLAPSE_STATE = {
+  scanner: false,
+  baqueForm: true,
+  search: true,
+  deliveryNote: true,
+  destinations: true,
+  baques: true,
+};
 const DEFAULT_BAQUES = [
   { name: "Baque 1", location: "Zone A" },
   { name: "Baque 2", location: "Zone B" },
@@ -9,6 +18,7 @@ const DEFAULT_BAQUES = [
 ];
 
 const state = loadState();
+const collapseState = loadCollapseState();
 const ui = {};
 const scanner = {
   instance: null,
@@ -85,6 +95,7 @@ function cacheElements() {
 }
 
 function bindEvents() {
+  document.addEventListener("click", handleCollapseToggle);
   ui.parcelForm.addEventListener("submit", handleParcelSubmit);
   ui.baqueForm.addEventListener("submit", handleBaqueSubmit);
   ui.searchInput.addEventListener("input", renderSearchResults);
@@ -116,6 +127,7 @@ function bindEvents() {
     void stopCaptureStream();
     void stopOcrWorker();
   });
+  window.addEventListener("resize", applyCollapseStateToDom);
 }
 
 function loadState() {
@@ -188,6 +200,26 @@ function createDefaultState() {
   };
 }
 
+function loadCollapseState() {
+  try {
+    const raw = window.localStorage.getItem(COLLAPSE_STORAGE_KEY);
+    if (!raw) {
+      return { ...DEFAULT_COLLAPSE_STATE };
+    }
+
+    const parsed = JSON.parse(raw);
+    return Object.fromEntries(
+      Object.keys(DEFAULT_COLLAPSE_STATE).map((key) => [key, Boolean(parsed?.[key] ?? DEFAULT_COLLAPSE_STATE[key])]),
+    );
+  } catch (error) {
+    return { ...DEFAULT_COLLAPSE_STATE };
+  }
+}
+
+function saveCollapseState() {
+  window.localStorage.setItem(COLLAPSE_STORAGE_KEY, JSON.stringify(collapseState));
+}
+
 function saveState() {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
@@ -199,6 +231,7 @@ function render() {
   renderBaques();
   renderSearchResults();
   renderDeliveryNotes();
+  applyCollapseStateToDom();
 }
 
 function renderHeroStats() {
@@ -600,6 +633,52 @@ function handleModalClick(event) {
   if (event.target instanceof HTMLElement && event.target.dataset.closeCapture === "true") {
     closeCaptureModal();
   }
+}
+
+function handleCollapseToggle(event) {
+  const button = event.target.closest("[data-collapse-toggle]");
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  const sectionKey = button.dataset.collapseKey;
+  if (!sectionKey || !(sectionKey in collapseState)) {
+    return;
+  }
+
+  collapseState[sectionKey] = !collapseState[sectionKey];
+  saveCollapseState();
+  applyCollapseStateToDom();
+}
+
+function applyCollapseStateToDom() {
+  const isMobile = window.matchMedia("(max-width: 760px)").matches;
+
+  document.querySelectorAll("[data-collapsible-key]").forEach((section) => {
+    if (!(section instanceof HTMLElement)) {
+      return;
+    }
+
+    const sectionKey = section.dataset.collapsibleKey;
+    if (!sectionKey) {
+      return;
+    }
+
+    const shouldCollapse = isMobile && Boolean(collapseState[sectionKey]);
+    const toggle = section.querySelector("[data-collapse-toggle]");
+    const body = section.querySelector(".collapsible-body");
+
+    section.classList.toggle("is-collapsed", shouldCollapse);
+
+    if (toggle instanceof HTMLButtonElement) {
+      toggle.textContent = shouldCollapse ? "Ouvrir" : "Reduire";
+      toggle.setAttribute("aria-expanded", String(!shouldCollapse));
+    }
+
+    if (body instanceof HTMLElement) {
+      body.hidden = shouldCollapse;
+    }
+  });
 }
 
 function openDeliveryNotePicker() {

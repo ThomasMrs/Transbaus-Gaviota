@@ -70,16 +70,29 @@
 
     <main class="content">
       <section class="dashboard-grid">
-        <article class="panel">
+        <article class="panel panel--collapsible" data-collapsible-key="scanner">
           <div class="section-head">
             <div>
               <p class="section-kicker">Action rapide</p>
               <h2>Scanner un colis</h2>
             </div>
-            <span class="status-badge">Sauvegarde locale</span>
+            <div class="section-head__actions">
+              <span class="status-badge">Sauvegarde locale</span>
+              <button
+                class="collapse-toggle"
+                type="button"
+                data-collapse-toggle
+                data-collapse-key="scanner"
+                aria-expanded="true"
+                aria-controls="scannerPanelBody"
+              >
+                Reduire
+              </button>
+            </div>
           </div>
 
-          <form id="parcelForm" class="form-stack">
+          <div id="scannerPanelBody" class="collapsible-body">
+            <form id="parcelForm" class="form-stack">
             <label class="field">
               <span>Baque actuelle</span>
               <select id="parcelBaqueSelect" required></select>
@@ -265,18 +278,30 @@
             <p class="field-help">
               Le numero destination est obligatoire. Tous les autres champs sont optionnels et peuvent etre remplis automatiquement par le scan d'etiquette.
             </p>
-          </form>
+            </form>
+          </div>
         </article>
 
-        <article class="panel">
+        <article class="panel panel--collapsible" data-collapsible-key="baqueForm">
           <div class="section-head">
             <div>
               <p class="section-kicker">Configuration</p>
               <h2>Ajouter une baque</h2>
             </div>
+            <button
+              class="collapse-toggle"
+              type="button"
+              data-collapse-toggle
+              data-collapse-key="baqueForm"
+              aria-expanded="true"
+              aria-controls="baquePanelBody"
+            >
+              Reduire
+            </button>
           </div>
 
-          <form id="baqueForm" class="form-stack">
+          <div id="baquePanelBody" class="collapsible-body">
+            <form id="baqueForm" class="form-stack">
             <label class="field">
               <span>Nom de la baque</span>
               <input
@@ -298,86 +323,137 @@
             </label>
 
             <button class="btn btn--primary" type="submit">Ajouter la baque</button>
-          </form>
+            </form>
+          </div>
         </article>
 
-        <article class="panel">
+        <article class="panel panel--collapsible" data-collapsible-key="search">
           <div class="section-head">
             <div>
               <p class="section-kicker">Recherche</p>
               <h2>Retrouver un colis</h2>
             </div>
+            <button
+              class="collapse-toggle"
+              type="button"
+              data-collapse-toggle
+              data-collapse-key="search"
+              aria-expanded="true"
+              aria-controls="searchPanelBody"
+            >
+              Reduire
+            </button>
           </div>
 
-          <label class="field">
-            <span>Code-barres, numero destination ou destination complete</span>
-            <input
-              id="searchInput"
-              type="search"
-              placeholder="Exemple : 063619, R447500 ou 47500 Saint-Vite"
-            >
-          </label>
+          <div id="searchPanelBody" class="collapsible-body">
+            <label class="field">
+              <span>Code-barres, numero destination ou destination complete</span>
+              <input
+                id="searchInput"
+                type="search"
+                placeholder="Exemple : 063619, R447500 ou 47500 Saint-Vite"
+              >
+            </label>
 
-          <div id="searchResults" class="search-results"></div>
+            <div id="searchResults" class="search-results"></div>
+          </div>
         </article>
 
-        <article class="panel">
+        <article class="panel panel--collapsible" data-collapsible-key="deliveryNote">
           <div class="section-head">
             <div>
               <p class="section-kicker">Documents</p>
               <h2>Bon de livraison PDF</h2>
             </div>
-            <span class="status-badge">Preparation</span>
+            <div class="section-head__actions">
+              <span class="status-badge">Preparation</span>
+              <button
+                class="collapse-toggle"
+                type="button"
+                data-collapse-toggle
+                data-collapse-key="deliveryNote"
+                aria-expanded="true"
+                aria-controls="deliveryNotePanelBody"
+              >
+                Reduire
+              </button>
+            </div>
           </div>
 
-          <div class="form-stack">
-            <p class="field-help">
-              Importez un bon de livraison en PDF. Pour l'instant, le site le stocke seulement pour la suite.
-            </p>
+          <div id="deliveryNotePanelBody" class="collapsible-body">
+            <div class="form-stack">
+              <p class="field-help">
+                Importez un bon de livraison en PDF. Pour l'instant, le site le stocke seulement pour la suite.
+              </p>
 
-            <button id="importDeliveryNoteBtn" class="btn btn--secondary" type="button">
-              Importer un PDF
-            </button>
+              <button id="importDeliveryNoteBtn" class="btn btn--secondary" type="button">
+                Importer un PDF
+              </button>
 
-            <input
-              id="deliveryNoteInput"
-              type="file"
-              accept="application/pdf,.pdf"
-              class="hidden-input"
-            >
+              <input
+                id="deliveryNoteInput"
+                type="file"
+                accept="application/pdf,.pdf"
+                class="hidden-input"
+              >
 
-            <p id="deliveryNoteStatus" class="field-help"></p>
-            <div id="deliveryNoteList" class="document-list"></div>
+              <p id="deliveryNoteStatus" class="field-help"></p>
+              <div id="deliveryNoteList" class="document-list"></div>
+            </div>
           </div>
         </article>
       </section>
 
-      <section class="section-block">
+      <section class="section-block section-block--collapsible" data-collapsible-key="destinations">
         <div class="section-head">
           <div>
             <p class="section-kicker">Repartition</p>
             <h2>Vue par destination</h2>
           </div>
+          <button
+            class="collapse-toggle"
+            type="button"
+            data-collapse-toggle
+            data-collapse-key="destinations"
+            aria-expanded="true"
+            aria-controls="destinationsSectionBody"
+          >
+            Reduire
+          </button>
+        </div>
+
+        <div id="destinationsSectionBody" class="collapsible-body">
           <p class="section-caption">
             Chaque carte indique dans quelles baques se trouvent les colis.
           </p>
+          <div id="destinationSummary" class="destination-grid"></div>
         </div>
-
-        <div id="destinationSummary" class="destination-grid"></div>
       </section>
 
-      <section class="section-block">
+      <section class="section-block section-block--collapsible" data-collapsible-key="baques">
         <div class="section-head">
           <div>
             <p class="section-kicker">Emplacements</p>
             <h2>Baques</h2>
           </div>
+          <button
+            class="collapse-toggle"
+            type="button"
+            data-collapse-toggle
+            data-collapse-key="baques"
+            aria-expanded="true"
+            aria-controls="baquesSectionBody"
+          >
+            Reduire
+          </button>
+        </div>
+
+        <div id="baquesSectionBody" class="collapsible-body">
           <p class="section-caption">
             Modifiez le nom, l'emplacement, les colis ou supprimez une baque.
           </p>
+          <div id="baquesGrid" class="baques-grid"></div>
         </div>
-
-        <div id="baquesGrid" class="baques-grid"></div>
       </section>
     </main>
   </div>
