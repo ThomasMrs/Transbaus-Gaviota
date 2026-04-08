@@ -1235,33 +1235,115 @@ function setDeliveryNoteBusy(isBusy, busyLabel = "Import en cours...") {
 }
 
 async function extractTextFromPdfFile(file, onProgress) {
-  if (typeof window.Tesseract?.createWorker !== "function") {
-    throw new Error("tesseract-unavailable");
-  }
-
   const pdfjsLib = await getPdfJs();
   const data = await file.arrayBuffer();
   const loadingTask = pdfjsLib.getDocument({ data });
   const pdfDocument = await loadingTask.promise;
-  const textChunks = [];
 
   try {
-    for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
-      onProgress?.(`Analyse du PDF page ${pageNumber}/${pdfDocument.numPages}...`);
-
-      const page = await pdfDocument.getPage(pageNumber);
-      const pageImage = await renderPdfPageToCanvas(page);
-      const worker = await getOcrWorker();
-      const result = await worker.recognize(pageImage);
-
-      textChunks.push(result.data.text || "");
-      page.cleanup();
+    const embeddedText = await extractEmbeddedTextFromPdfDocument(pdfDocument, onProgress);
+    if (parseDeliveryNoteText(embeddedText).length) {
+      return embeddedText;
     }
+
+    if (typeof window.Tesseract?.createWorker !== "function") {
+      throw new Error("tesseract-unavailable");
+    }
+
+    return await extractOcrTextFromPdfDocument(pdfDocument, onProgress);
   } finally {
     await loadingTask.destroy();
   }
+}
+
+async function extractEmbeddedTextFromPdfDocument(pdfDocument, onProgress) {
+  const textChunks = [];
+
+  for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
+    onProgress?.(`Lecture du texte du PDF page ${pageNumber}/${pdfDocument.numPages}...`);
+
+    const page = await pdfDocument.getPage(pageNumber);
+
+    try {
+      const lines = await extractPdfPageLines(page);
+      textChunks.push(lines.join("\n"));
+    } finally {
+      page.cleanup();
+    }
+  }
 
   return textChunks.join("\n");
+}
+
+async function extractOcrTextFromPdfDocument(pdfDocument, onProgress) {
+  const textChunks = [];
+
+  for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
+    onProgress?.(`Analyse OCR du PDF page ${pageNumber}/${pdfDocument.numPages}...`);
+
+    const page = await pdfDocument.getPage(pageNumber);
+
+    try {
+      const pageImage = await renderPdfPageToCanvas(page);
+      const worker = await getOcrWorker();
+      const result = await worker.recognize(pageImage);
+      textChunks.push(result.data.text || "");
+    } finally {
+      page.cleanup();
+    }
+  }
+
+  return textChunks.join("\n");
+}
+
+async function extractPdfPageLines(page) {
+  const textContent = await page.getTextContent();
+  return groupPdfTextItemsIntoLines(textContent.items || []);
+}
+
+function groupPdfTextItemsIntoLines(items) {
+  const positionedItems = items
+    .filter((item) => item?.str && item.str.trim())
+    .map((item) => ({
+      text: item.str,
+      x: Number(item.transform?.[4] || 0),
+      y: Number(item.transform?.[5] || 0),
+      width: Number(item.width || 0),
+    }));
+  const rows = [];
+  const lineTolerance = 1.5;
+
+  positionedItems.forEach((item) => {
+    let row = rows.find((candidate) => Math.abs(candidate.y - item.y) <= lineTolerance);
+    if (!row) {
+      row = { y: item.y, items: [] };
+      rows.push(row);
+    }
+
+    row.items.push(item);
+  });
+
+  return rows
+    .sort((left, right) => right.y - left.y)
+    .map((row) => {
+      row.items.sort((left, right) => left.x - right.x);
+
+      let line = "";
+      let previousEnd = null;
+
+      row.items.forEach((item) => {
+        const gap = previousEnd === null ? 0 : item.x - previousEnd;
+        if (line && gap > 1.5) {
+          line += " ";
+        }
+
+        line += item.text;
+        previousEnd = item.x + item.width;
+      });
+
+      return normalizeDeliveryTextLine(line);
+    })
+    .filter(Boolean);
 }
 
 function parseDeliveryNoteText(text) {
@@ -1270,6 +1352,13 @@ function parseDeliveryNoteText(text) {
     .split("\n")
     .map((line) => normalizePdfOcrLine(line))
     .filter(Boolean);
+  const structuredEntries = dedupeDeliveryEntries(parseStructuredDeliveryNoteLines(lines));
+  const legacyEntries = dedupeDeliveryEntries(parseLegacyDeliveryNoteLines(lines));
+
+  return structuredEntries.length >= legacyEntries.length ? structuredEntries : legacyEntries;
+}
+
+function parseLegacyDeliveryNoteLines(lines) {
   const entries = [];
 
   lines.forEach((line, index) => {
@@ -1290,7 +1379,7 @@ function parseDeliveryNoteText(text) {
     });
   });
 
-  return dedupeDeliveryEntries(entries);
+  return entries;
 }
 
 function compareDeliveryNoteEntries(entries) {
@@ -2341,7 +2430,7 @@ async function deleteDeliveryNoteFile(noteId) {
 }
 
 function normalizePdfOcrLine(value) {
-  return normalizeFreeText(
+  return normalizeDeliveryTextLine(
     String(value)
       .replace(/[|]/g, "I")
       .replace(/[“”]/g, '"')
@@ -2351,9 +2440,149 @@ function normalizePdfOcrLine(value) {
   );
 }
 
+function normalizeDeliveryTextLine(value) {
+  return normalizeFreeText(
+    String(value)
+      .replace(/([A-Za-zÀ-ÿ'´])(?=\d{5}\b)/gu, "$1 ")
+      .replace(/(\d{5})(?=[A-Za-zÀ-ÿ'´])/gu, "$1 ")
+      .replace(/([A-Za-zÀ-ÿ'´])(?=0\d(?:[ .]?\d{2}){4}\b)/gu, "$1 ")
+      .replace(/([a-zà-ÿ])([A-ZÀ-Ý])/gu, "$1 $2"),
+  );
+}
+
+function normalizeDeliveryCommandLine(line) {
+  return normalizeDeliveryTextLine(line)
+    .replace(/C\s*O\s*M\s*M?\s*A\s*N\s*D\s*E/gi, "COMMANDE")
+    .replace(/C\s*D\s*E/gi, "CDE");
+}
+
+function parseStructuredDeliveryNoteLines(lines) {
+  const entries = [];
+  let currentContext = createDeliveryContext();
+  let pendingPackageCount = 0;
+
+  lines.forEach((line, index) => {
+    if (!line || isDeliveryPageMetaLine(line)) {
+      return;
+    }
+
+    if (isDeliveryAddressHeaderLine(line)) {
+      const blockLines = [];
+
+      for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+        const candidate = lines[cursor];
+        if (isDeliveryDetailHeaderLine(candidate) || isDeliveryAddressHeaderLine(candidate) || isDeliveryPageMetaLine(candidate)) {
+          break;
+        }
+
+        blockLines.push(candidate);
+      }
+
+      const nextContext = extractDeliveryContextFromBlock(blockLines);
+      if (nextContext.client || nextContext.city) {
+        currentContext = nextContext;
+      }
+      return;
+    }
+
+    const packageCount = extractDeliveryPackageCountFromSummaryLine(line);
+    if (packageCount) {
+      pendingPackageCount = packageCount;
+      return;
+    }
+
+    const commandNumber = extractDeliveryCommandNumber(line);
+    if (!commandNumber) {
+      return;
+    }
+
+    const barcodeInfo = findNearbyDeliveryBarcode(lines, index, commandNumber);
+    entries.push({
+      commandNumber,
+      expectedCount: pendingPackageCount || barcodeInfo?.packageCount || 1,
+      client: currentContext.client,
+      city: currentContext.city,
+      rawContext: buildDeliveryEntryContext(currentContext, line, barcodeInfo?.line || ""),
+    });
+
+    pendingPackageCount = 0;
+  });
+
+  return entries;
+}
+
+function createDeliveryContext() {
+  return {
+    client: "",
+    city: "",
+    blockLines: [],
+  };
+}
+
+function isDeliveryAddressHeaderLine(line) {
+  return /CODE\s*POSTAL/i.test(line) && /VILLE/i.test(line) && /CLIENT/i.test(line);
+}
+
+function isDeliveryDetailHeaderLine(line) {
+  return /N[º°O]?\s*B/i.test(line) && /N[º°O]?\s*COLIS/i.test(line);
+}
+
+function isDeliveryPageMetaLine(line) {
+  return [
+    /GAVIOTA FRANCE/i,
+    /BON DE LIVRAISON/i,
+    /N[º°O]?\s*DISTRIBUTION/i,
+    /^DU\s+\d{2}\/\d{2}\/\d{4}/i,
+    /^PAGE\s+\d+\s*\/\s*\d+/i,
+    /^TOTAL\s+COLIS/i,
+  ].some((regex) => regex.test(line));
+}
+
+function extractDeliveryPackageCountFromSummaryLine(line) {
+  const match = normalizeDeliveryTextLine(line).match(/^\d{6}\s+\d{2}\/\d{2}\/\d{4}\s+([1-9]\d?)[,.]0{1,2}\b/);
+  return match ? Number.parseInt(match[1], 10) : 0;
+}
+
 function extractDeliveryCommandNumber(line) {
-  const match = line.match(/COMMANDE[\sA-Z°ºN:R.W-]*?(\d{5,8})\b/i);
+  const normalizedLine = normalizeDeliveryCommandLine(line);
+  const match = normalizedLine.match(/COMMANDE[^\d]{0,20}(\d{5,8})\b/i);
   return match ? normalizeBarcode(match[1]) : "";
+}
+
+function extractDeliveryBarcodeInfo(line) {
+  const match = normalizeDeliveryTextLine(line).match(/\*?(\d{5,8})(\d{3})\*?/);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    commandNumber: normalizeBarcode(match[1]),
+    packageCount: Number.parseInt(match[2], 10),
+    line: normalizeDeliveryTextLine(line),
+  };
+}
+
+function findNearbyDeliveryBarcode(lines, startIndex, expectedCommandNumber = "") {
+  for (let index = startIndex + 1; index <= Math.min(lines.length - 1, startIndex + 3); index += 1) {
+    const barcodeInfo = extractDeliveryBarcodeInfo(lines[index]);
+    if (!barcodeInfo) {
+      continue;
+    }
+
+    if (expectedCommandNumber && barcodeInfo.commandNumber !== expectedCommandNumber) {
+      continue;
+    }
+
+    return barcodeInfo;
+  }
+
+  return null;
+}
+
+function buildDeliveryEntryContext(context, commandLine, barcodeLine) {
+  return [context.client, context.city, ...context.blockLines.slice(0, 2), commandLine, barcodeLine]
+    .filter(Boolean)
+    .join(" | ");
 }
 
 function resolveDeliveryCommandNumber(initialValue, contextLines) {
@@ -2381,7 +2610,7 @@ function resolveDeliveryCommandNumber(initialValue, contextLines) {
 
 function getDeliveryCommandCandidateScore(candidate, initialValue, frequencies) {
   let score = 0;
-  const line = candidate.line || "";
+  const line = normalizeDeliveryCommandLine(candidate.line || "");
 
   if (candidate.value === initialValue) {
     score += 20;
@@ -2410,14 +2639,63 @@ function getDeliveryCommandCandidateScore(candidate, initialValue, frequencies) 
 }
 
 function extractDeliveryClient(lines) {
+  return extractDeliveryClientFromBlock(lines);
+}
+
+function sliceUppercaseClientTokens(value) {
+  const tokens = normalizeDeliveryTextLine(value).split(" ");
+  const clientTokens = [];
+
+  for (const token of tokens) {
+    if (/^\d{5}$/.test(token)) {
+      break;
+    }
+
+    if (/^\d+([,./-]\S*)?$/.test(token) || token.includes("/")) {
+      break;
+    }
+
+    if (isDeliveryAddressToken(token)) {
+      break;
+    }
+
+    if (/[a-zà-ÿ]/u.test(token) && !looksLikeAllowedLowercaseClientToken(token)) {
+      break;
+    }
+
+    clientTokens.push(token);
+  }
+
+  const clientName = normalizeDeliveryClientName(clientTokens.join(" "));
+  return /[A-Z]/.test(clientName) ? clientName : "";
+}
+
+function extractDeliveryCity(lines) {
+  return extractDeliveryCityFromBlock(lines);
+}
+
+function extractDeliveryContextFromBlock(lines) {
+  const blockLines = lines
+    .filter(Boolean)
+    .map((line) => normalizeDeliveryTextLine(line));
+
+  return {
+    client: extractDeliveryClientFromBlock(blockLines),
+    city: extractDeliveryCityFromBlock(blockLines),
+    blockLines,
+  };
+}
+
+function extractDeliveryClientFromBlock(lines) {
   for (const line of lines) {
-    const normalized = line.replace(/[©@]/g, " ").trim();
-    const match = normalized.match(/^\d{5,6}\s+(.+)$/);
-    if (!match) {
+    const normalizedLine = normalizeDeliveryTextLine(line.replace(/[©@]/g, " "));
+    const payload = normalizedLine.replace(/^(?:\d+\s+)?\d{5,6}\s+/, "");
+
+    if (payload === normalizedLine && /\b\d{5}\b/.test(normalizedLine)) {
       continue;
     }
 
-    const clientName = sliceUppercaseClientTokens(match[1]);
+    const clientName = sliceUppercaseClientTokens(payload);
     if (clientName) {
       return clientName;
     }
@@ -2426,54 +2704,51 @@ function extractDeliveryClient(lines) {
   return "";
 }
 
-function sliceUppercaseClientTokens(value) {
-  const tokens = normalizeFreeText(value).split(" ");
-  const clientTokens = [];
+function extractDeliveryCityFromBlock(lines) {
+  const normalizedLines = lines.map((line) => normalizeDeliveryTextLine(line));
 
-  for (const token of tokens) {
-    if (/^\d{5}$/.test(token)) {
-      break;
-    }
-
-    if (/^\d+$/.test(token) || token.includes("/")) {
-      break;
-    }
-
-    if (/[a-zà-ÿ]/u.test(token)) {
-      break;
-    }
-
-    clientTokens.push(token);
-  }
-
-  const clientName = normalizeFreeText(clientTokens.join(" "));
-  return /[A-Z]/.test(clientName) ? clientName : "";
-}
-
-function extractDeliveryCity(lines) {
-  for (const line of lines) {
-    const cleaned = normalizeFreeText(line.replace(/[©@]/g, " "));
-    const postalMatch = cleaned.match(/\b\d{5}\b/);
+  for (let index = 0; index < normalizedLines.length; index += 1) {
+    const line = normalizedLines[index];
+    const postalMatches = [...line.matchAll(/\b\d{5}\b/g)];
+    const postalMatch = postalMatches[postalMatches.length - 1];
     if (!postalMatch) {
       continue;
     }
 
-    const afterPostalCode = cleaned.slice(postalMatch.index + postalMatch[0].length).trim().split(" ");
-    const cityTokens = [];
+    let city = collectDeliveryCityTokens(line.slice(postalMatch.index + postalMatch[0].length));
 
-    for (const token of afterPostalCode) {
-      if (/^\d+$/.test(token) || /[a-zà-ÿ]/u.test(token)) {
-        break;
+    if (index > 0) {
+      const previousLine = normalizedLines[index - 1];
+      if (!/\b\d{5}\b/.test(previousLine) || looksLikeFrenchPhoneNumber(previousLine)) {
+        const previousFragment = collectDeliveryTrailingUppercaseFragment(previousLine);
+        if (previousFragment && (previousFragment.length <= 10 || !city || city.length <= 10)) {
+          city = joinDeliveryCityFragments(previousFragment, city);
+        }
       }
-
-      if (!/[A-Z]/.test(token)) {
-        break;
-      }
-
-      cityTokens.push(token);
     }
 
-    const city = normalizeFreeText(cityTokens.join(" "));
+    for (let cursor = index + 1; cursor < normalizedLines.length; cursor += 1) {
+      const nextLine = normalizedLines[cursor];
+      if (isDeliveryDetailHeaderLine(nextLine) || isDeliveryAddressHeaderLine(nextLine) || isDeliveryPageMetaLine(nextLine)) {
+        break;
+      }
+
+      if (/\b\d{5}\b/.test(nextLine) || looksLikeFrenchPhoneNumber(nextLine)) {
+        break;
+      }
+
+      if (/[a-zà-ÿ]/u.test(nextLine)) {
+        break;
+      }
+
+      const continuation = collectDeliveryCityTokens(nextLine);
+      if (!continuation) {
+        break;
+      }
+
+      city = joinDeliveryCityFragments(city, continuation);
+    }
+
     if (city) {
       return city;
     }
@@ -2482,11 +2757,84 @@ function extractDeliveryCity(lines) {
   return "";
 }
 
+function normalizeDeliveryClientName(value) {
+  return normalizeDeliveryTextLine(value)
+    .replace(/([A-ZÀ-Ý]{3,})(SARL|SAS|SASU|EURL)\b/gu, "$1 $2");
+}
+
+function looksLikeAllowedLowercaseClientToken(token) {
+  return /^(sarl|sas|sasu|eurl|sa|snc|mr|mme|mlle)$/i.test(token);
+}
+
+function isDeliveryAddressToken(token) {
+  return /^(?:ZA|ZI|ZAC|ZD|ZONE|PARC|RUE|AVENUE|AVE|CHEMIN|IMPASSE|ROUTE|BD|BOULEVARD|ALLEE|ALLEES|RESIDENCE|RÉSIDENCE|BAT|BÂT|QUAI|LIEU-DIT|LIEUDIT)$/i.test(token);
+}
+
+function collectDeliveryCityTokens(value) {
+  const tokens = normalizeDeliveryTextLine(value)
+    .replace(/\b0\d(?:[ .]?\d{2}){4}\b/g, " ")
+    .split(" ")
+    .filter(Boolean);
+  const cityTokens = [];
+
+  for (const token of tokens) {
+    if (/^\d+$/.test(token) || looksLikeFrenchPhoneNumber(token)) {
+      break;
+    }
+
+    if (!/[A-ZÀ-Ý]/u.test(token)) {
+      break;
+    }
+
+    cityTokens.push(token);
+  }
+
+  return normalizeFreeText(cityTokens.join(" "));
+}
+
+function collectDeliveryTrailingUppercaseFragment(value) {
+  const cleaned = normalizeDeliveryTextLine(value)
+    .replace(/\b0\d(?:[ .]?\d{2}){4}\b/g, " ")
+    .trim();
+  const match = cleaned.match(/([A-ZÀ-Ý'´&-]+(?:\s+[A-ZÀ-Ý'´&-]+)*)$/u);
+  return match ? normalizeFreeText(match[1]) : "";
+}
+
+function joinDeliveryCityFragments(left, right) {
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  if (right.length === 1 || /-$/.test(left) || /-[A-ZÀ-Ý]+$/u.test(left)) {
+    return `${left}${right}`;
+  }
+
+  return `${left} ${right}`;
+}
+
+function looksLikeFrenchPhoneNumber(value) {
+  return /\b0\d(?:[ .]?\d{2}){4}\b/.test(value);
+}
+
 function extractDeliveryPackageCount(lines, commandIndex) {
   const candidates = [];
 
   lines.forEach((line, index) => {
-    const normalizedLine = normalizeFreeText(line.replace(/\bO,00\b/gi, "0,00"));
+    const normalizedLine = normalizeDeliveryTextLine(line.replace(/\bO,00\b/gi, "0,00"));
+    const summaryCount = extractDeliveryPackageCountFromSummaryLine(normalizedLine);
+    if (summaryCount) {
+      candidates.push({
+        count: summaryCount,
+        line: normalizedLine,
+        index,
+        source: "summary",
+      });
+    }
+
     const decimalMatches = [...normalizedLine.matchAll(/\b([1-9]\d?)[,.]0{1,2}\b/g)];
     decimalMatches.forEach((match) => {
       candidates.push({
@@ -2535,6 +2883,10 @@ function getDeliveryPackageCountScore(candidate, commandIndex) {
 
   if (candidate.source === "decimal") {
     score += 12;
+  }
+
+  if (candidate.source === "summary") {
+    score += 28;
   }
 
   score -= Math.abs(candidate.index - commandIndex) * 4;
