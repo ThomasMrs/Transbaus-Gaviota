@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta
+    name="description"
+    content="Application locale de tri de colis par baques avec scan de code-barres, recherche et suivi par destination."
+  >
+  <title>Transbaus Gaviota</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap"
+    rel="stylesheet"
+  >
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div class="hero__copy">
+        <p class="eyebrow">Tri de colis</p>
+        <h1>Scannez, rangez et retrouvez chaque colis par baque.</h1>
+        <p class="hero__lead">
+          Ajoutez des baques, associez un colis a une destination, puis suivez
+          en un coup d'oeil dans quelle baque il se trouve.
+        </p>
+        <div id="heroStats" class="hero__stats"></div>
+      </div>
+
+      <aside class="panel panel--highlight">
+        <div class="hero__side-label">Flux conseille</div>
+        <ol class="flow-list">
+          <li>Choisir la baque actuelle du colis.</li>
+          <li>Renseigner la destination et scanner le code-barres.</li>
+          <li>Deplacer ou supprimer le colis si son emplacement change.</li>
+        </ol>
+        <p class="hero__side-note">
+          Pour la camera en local, lancez le site avec <code>serve-local.ps1</code>
+          puis ouvrez <code>http://localhost:4173</code>.
+        </p>
+      </aside>
+    </header>
+
+    <main class="content">
+      <section class="dashboard-grid">
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Action rapide</p>
+              <h2>Scanner un colis</h2>
+            </div>
+            <span class="status-badge">Sauvegarde locale</span>
+          </div>
+
+          <form id="parcelForm" class="form-stack">
+            <label class="field">
+              <span>Baque actuelle</span>
+              <select id="parcelBaqueSelect" required></select>
+            </label>
+
+            <label class="field">
+              <span>Destination</span>
+              <input
+                id="destinationInput"
+                type="text"
+                maxlength="12"
+                placeholder="Exemple : 66"
+                required
+              >
+            </label>
+
+            <label class="field">
+              <span>Code-barres</span>
+              <input
+                id="barcodeInput"
+                type="text"
+                inputmode="numeric"
+                placeholder="Scanne ou saisi manuellement"
+                required
+              >
+            </label>
+
+            <div class="actions">
+              <button id="openScannerBtn" class="btn btn--secondary" type="button">
+                Ouvrir le scanner
+              </button>
+              <button class="btn btn--primary" type="submit">
+                Enregistrer le colis
+              </button>
+            </div>
+
+            <p class="field-help">
+              Si le code-barres existe deja, le colis est mis a jour au lieu d'etre duplique.
+            </p>
+          </form>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Configuration</p>
+              <h2>Ajouter une baque</h2>
+            </div>
+          </div>
+
+          <form id="baqueForm" class="form-stack">
+            <label class="field">
+              <span>Nom de la baque</span>
+              <input
+                id="baqueNameInput"
+                type="text"
+                placeholder="Exemple : Baque 5"
+                required
+              >
+            </label>
+
+            <label class="field">
+              <span>Emplacement</span>
+              <input
+                id="baqueLocationInput"
+                type="text"
+                placeholder="Exemple : Quai B"
+                required
+              >
+            </label>
+
+            <button class="btn btn--primary" type="submit">Ajouter la baque</button>
+          </form>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Recherche</p>
+              <h2>Retrouver un colis</h2>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>Code-barres ou destination</span>
+            <input
+              id="searchInput"
+              type="search"
+              placeholder="Exemple : 66 ou 123456789"
+            >
+          </label>
+
+          <div id="searchResults" class="search-results"></div>
+        </article>
+      </section>
+
+      <section class="section-block">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Repartition</p>
+            <h2>Vue par destination</h2>
+          </div>
+          <p class="section-caption">
+            Chaque carte indique dans quelles baques se trouvent les colis.
+          </p>
+        </div>
+
+        <div id="destinationSummary" class="destination-grid"></div>
+      </section>
+
+      <section class="section-block">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Emplacements</p>
+            <h2>Baques</h2>
+          </div>
+          <p class="section-caption">
+            Modifiez le nom, l'emplacement, les colis ou supprimez une baque.
+          </p>
+        </div>
+
+        <div id="baquesGrid" class="baques-grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="scannerModal" class="modal hidden" aria-hidden="true">
+    <div class="modal__backdrop" data-close-scanner="true"></div>
+    <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="scannerTitle">
+      <div class="modal__header">
+        <div>
+          <p class="section-kicker">Camera</p>
+          <h2 id="scannerTitle">Scanner un code-barres</h2>
+        </div>
+        <button id="closeScannerBtn" class="icon-btn" type="button">
+          Fermer
+        </button>
+      </div>
+
+      <div class="scanner-frame">
+        <video id="scannerVideo" class="scanner-video" playsinline muted></video>
+      </div>
+
+      <p class="scanner-help">
+        Le colis sera ajoute automatiquement si la baque et la destination sont deja remplies.
+      </p>
+      <p id="scannerStatus" class="scanner-status"></p>
+    </div>
+  </div>
+
+  <div id="toastZone" class="toast-zone" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>
