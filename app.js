@@ -41,9 +41,13 @@ function cacheElements() {
   ui.barcodeInput = document.querySelector("#barcodeInput");
   ui.openScannerBtn = document.querySelector("#openScannerBtn");
   ui.importBarcodeBtn = document.querySelector("#importBarcodeBtn");
+  ui.chooseBarcodeBtn = document.querySelector("#chooseBarcodeBtn");
   ui.scanLabelBtn = document.querySelector("#scanLabelBtn");
-  ui.labelImageInput = document.querySelector("#labelImageInput");
-  ui.barcodeImageInput = document.querySelector("#barcodeImageInput");
+  ui.chooseLabelBtn = document.querySelector("#chooseLabelBtn");
+  ui.labelCameraInput = document.querySelector("#labelCameraInput");
+  ui.labelLibraryInput = document.querySelector("#labelLibraryInput");
+  ui.barcodeCameraInput = document.querySelector("#barcodeCameraInput");
+  ui.barcodeLibraryInput = document.querySelector("#barcodeLibraryInput");
   ui.ocrStatus = document.querySelector("#ocrStatus");
   ui.barcodeStatus = document.querySelector("#barcodeStatus");
   ui.baqueForm = document.querySelector("#baqueForm");
@@ -66,10 +70,14 @@ function bindEvents() {
   ui.baqueForm.addEventListener("submit", handleBaqueSubmit);
   ui.searchInput.addEventListener("input", renderSearchResults);
   ui.openScannerBtn.addEventListener("click", openScanner);
-  ui.importBarcodeBtn.addEventListener("click", openBarcodeImagePicker);
-  ui.scanLabelBtn.addEventListener("click", openLabelScanner);
-  ui.barcodeImageInput.addEventListener("change", handleBarcodeImageChange);
-  ui.labelImageInput.addEventListener("change", handleLabelImageChange);
+  ui.importBarcodeBtn.addEventListener("click", openBarcodeCameraPicker);
+  ui.chooseBarcodeBtn.addEventListener("click", openBarcodeLibraryPicker);
+  ui.scanLabelBtn.addEventListener("click", openLabelCameraPicker);
+  ui.chooseLabelBtn.addEventListener("click", openLabelLibraryPicker);
+  ui.barcodeCameraInput.addEventListener("change", handleBarcodeImageChange);
+  ui.barcodeLibraryInput.addEventListener("change", handleBarcodeImageChange);
+  ui.labelCameraInput.addEventListener("change", handleLabelImageChange);
+  ui.labelLibraryInput.addEventListener("change", handleLabelImageChange);
   ui.closeScannerBtn.addEventListener("click", closeScanner);
   ui.scannerModal.addEventListener("click", handleModalClick);
   ui.baquesGrid.addEventListener("click", handleBaqueGridClick);
@@ -517,20 +525,36 @@ function handleModalClick(event) {
   }
 }
 
-function openLabelScanner() {
+function openLabelCameraPicker() {
   if (ocr.busy) {
     return;
   }
 
-  ui.labelImageInput.click();
+  ui.labelCameraInput.click();
 }
 
-function openBarcodeImagePicker() {
+function openLabelLibraryPicker() {
+  if (ocr.busy) {
+    return;
+  }
+
+  ui.labelLibraryInput.click();
+}
+
+function openBarcodeCameraPicker() {
   if (scanner.importingBarcode) {
     return;
   }
 
-  ui.barcodeImageInput.click();
+  ui.barcodeCameraInput.click();
+}
+
+function openBarcodeLibraryPicker() {
+  if (scanner.importingBarcode) {
+    return;
+  }
+
+  ui.barcodeLibraryInput.click();
 }
 
 async function handleBarcodeImageChange(event) {
@@ -541,7 +565,7 @@ async function handleBarcodeImageChange(event) {
 
   if (typeof window.Html5Qrcode === "undefined") {
     showToast("La librairie de scan n'a pas pu etre chargee.", "danger");
-    ui.barcodeImageInput.value = "";
+    resetBarcodeInputs();
     return;
   }
 
@@ -577,7 +601,7 @@ async function handleBarcodeImageChange(event) {
     }
 
     ui.barcodeFileReader.innerHTML = "";
-    ui.barcodeImageInput.value = "";
+    resetBarcodeInputs();
     setBarcodeImportBusy(false);
   }
 }
@@ -590,7 +614,7 @@ async function handleLabelImageChange(event) {
 
   if (typeof window.Tesseract?.createWorker !== "function") {
     showToast("Le module OCR n'est pas disponible.", "danger");
-    ui.labelImageInput.value = "";
+    resetLabelInputs();
     return;
   }
 
@@ -617,20 +641,34 @@ async function handleLabelImageChange(event) {
     showToast("Impossible de lire l'etiquette. Reessayez avec une photo plus nette.", "danger");
   } finally {
     setOcrBusy(false);
-    ui.labelImageInput.value = "";
+    resetLabelInputs();
   }
 }
 
 function setOcrBusy(isBusy) {
   ocr.busy = isBusy;
   ui.scanLabelBtn.disabled = isBusy;
-  ui.scanLabelBtn.textContent = isBusy ? "Analyse etiquette..." : "Importer photo etiquette";
+  ui.chooseLabelBtn.disabled = isBusy;
+  ui.scanLabelBtn.textContent = isBusy ? "Analyse en cours..." : "Prendre une photo";
+  ui.chooseLabelBtn.textContent = isBusy ? "Analyse en cours..." : "Choisir une photo";
 }
 
 function setBarcodeImportBusy(isBusy) {
   scanner.importingBarcode = isBusy;
   ui.importBarcodeBtn.disabled = isBusy;
-  ui.importBarcodeBtn.textContent = isBusy ? "Analyse code-barres..." : "Importer photo code-barres";
+  ui.chooseBarcodeBtn.disabled = isBusy;
+  ui.importBarcodeBtn.textContent = isBusy ? "Analyse en cours..." : "Prendre une photo";
+  ui.chooseBarcodeBtn.textContent = isBusy ? "Analyse en cours..." : "Choisir une photo";
+}
+
+function resetLabelInputs() {
+  ui.labelCameraInput.value = "";
+  ui.labelLibraryInput.value = "";
+}
+
+function resetBarcodeInputs() {
+  ui.barcodeCameraInput.value = "";
+  ui.barcodeLibraryInput.value = "";
 }
 
 async function getOcrWorker() {
