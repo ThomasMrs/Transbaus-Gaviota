@@ -1,4 +1,6 @@
 const STORAGE_KEY = "transbaus-gaviota-state-v1";
+const PDF_DB_NAME = "le-baus-du-tri-documents-v1";
+const PDF_STORE_NAME = "delivery-notes";
 const DEFAULT_BAQUES = [
   { name: "Baque 1", location: "Zone A" },
   { name: "Baque 2", location: "Zone B" },
@@ -60,6 +62,10 @@ function cacheElements() {
   ui.baqueLocationInput = document.querySelector("#baqueLocationInput");
   ui.searchInput = document.querySelector("#searchInput");
   ui.searchResults = document.querySelector("#searchResults");
+  ui.importDeliveryNoteBtn = document.querySelector("#importDeliveryNoteBtn");
+  ui.deliveryNoteInput = document.querySelector("#deliveryNoteInput");
+  ui.deliveryNoteStatus = document.querySelector("#deliveryNoteStatus");
+  ui.deliveryNoteList = document.querySelector("#deliveryNoteList");
   ui.destinationSummary = document.querySelector("#destinationSummary");
   ui.baquesGrid = document.querySelector("#baquesGrid");
   ui.scannerModal = document.querySelector("#scannerModal");
@@ -82,6 +88,13 @@ function bindEvents() {
   ui.parcelForm.addEventListener("submit", handleParcelSubmit);
   ui.baqueForm.addEventListener("submit", handleBaqueSubmit);
   ui.searchInput.addEventListener("input", renderSearchResults);
+  ui.importDeliveryNoteBtn.addEventListener("click", openDeliveryNotePicker);
+  ui.deliveryNoteInput.addEventListener("change", (event) => {
+    void handleDeliveryNoteImport(event);
+  });
+  ui.deliveryNoteList.addEventListener("click", (event) => {
+    void handleDeliveryNoteListClick(event);
+  });
   ui.openScannerBtn.addEventListener("click", openScanner);
   ui.importBarcodeBtn.addEventListener("click", openBarcodeCameraPicker);
   ui.chooseBarcodeBtn.addEventListener("click", openBarcodeLibraryPicker);
@@ -146,10 +159,16 @@ function loadState() {
         updatedAt: parcel.updatedAt || parcel.createdAt || new Date().toISOString(),
       }))
       .filter((parcel) => parcel.routeCode || parcel.barcode || parcel.destination);
+    const deliveryNotes = Array.isArray(parsed.deliveryNotes)
+      ? parsed.deliveryNotes
+        .map((note) => normalizeDeliveryNote(note))
+        .filter(Boolean)
+      : [];
 
     return {
       baques: baques.length ? baques : createDefaultState().baques,
       parcels,
+      deliveryNotes,
     };
   } catch (error) {
     return createDefaultState();
@@ -165,6 +184,7 @@ function createDefaultState() {
       createdAt: new Date().toISOString(),
     })),
     parcels: [],
+    deliveryNotes: [],
   };
 }
 
@@ -178,6 +198,7 @@ function render() {
   renderDestinationSummary();
   renderBaques();
   renderSearchResults();
+  renderDeliveryNotes();
 }
 
 function renderHeroStats() {
@@ -460,6 +481,40 @@ function renderSearchResults() {
     .join("");
 }
 
+function renderDeliveryNotes() {
+  if (!state.deliveryNotes.length) {
+    ui.deliveryNoteList.innerHTML = `
+      <article class="empty-card">
+        <p class="empty-state">Aucun PDF importe pour le moment.</p>
+      </article>
+    `;
+    return;
+  }
+
+  ui.deliveryNoteList.innerHTML = state.deliveryNotes
+    .slice()
+    .sort((left, right) => new Date(right.importedAt) - new Date(left.importedAt))
+    .map((note) => `
+      <article class="document-card">
+        <div class="document-card__body">
+          <p class="document-card__title">${escapeHtml(note.name)}</p>
+          <p class="document-card__meta">
+            PDF ${escapeHtml(formatFileSize(note.size))} | importe le ${escapeHtml(formatDate(note.importedAt))}
+          </p>
+        </div>
+        <button
+          class="btn btn--danger document-card__action"
+          type="button"
+          data-action="delete-delivery-note"
+          data-note-id="${escapeHtml(note.id)}"
+        >
+          Supprimer
+        </button>
+      </article>
+    `)
+    .join("");
+}
+
 function handleParcelSubmit(event) {
   event.preventDefault();
   upsertParcel();
@@ -545,6 +600,80 @@ function handleModalClick(event) {
   if (event.target instanceof HTMLElement && event.target.dataset.closeCapture === "true") {
     closeCaptureModal();
   }
+}
+
+function openDeliveryNotePicker() {
+  ui.deliveryNoteInput.click();
+}
+
+async function handleDeliveryNoteImport(event) {
+  const file = event.target.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  if (!looksLikePdf(file)) {
+    ui.deliveryNoteStatus.textContent = "Ce fichier n'est pas un PDF valide.";
+    ui.deliveryNoteInput.value = "";
+    showToast("Choisissez un fichier PDF valide.", "danger");
+    return;
+  }
+
+  const deliveryNote = {
+    id: createId(),
+    name: normalizeFreeText(file.name || "Bon-de-livraison.pdf"),
+    size: Number(file.size || 0),
+    importedAt: new Date().toISOString(),
+  };
+
+  try {
+    setDeliveryNoteBusy(true);
+    ui.deliveryNoteStatus.textContent = "Import du PDF en cours...";
+
+    await saveDeliveryNoteFile(deliveryNote.id, file);
+    state.deliveryNotes.unshift(deliveryNote);
+    saveState();
+    renderDeliveryNotes();
+
+    ui.deliveryNoteStatus.textContent = `PDF importe : ${deliveryNote.name}`;
+    showToast(`PDF ${deliveryNote.name} importe.`);
+  } catch (error) {
+    ui.deliveryNoteStatus.textContent = "Impossible d'importer ce PDF.";
+    showToast("Impossible d'importer ce PDF.", "danger");
+  } finally {
+    ui.deliveryNoteInput.value = "";
+    setDeliveryNoteBusy(false);
+  }
+}
+
+async function handleDeliveryNoteListClick(event) {
+  const button = event.target.closest("[data-action='delete-delivery-note']");
+  if (!(button instanceof HTMLElement)) {
+    return;
+  }
+
+  const noteId = button.dataset.noteId;
+  const deliveryNote = state.deliveryNotes.find((note) => note.id === noteId);
+  if (!noteId || !deliveryNote) {
+    return;
+  }
+
+  if (!window.confirm(`Supprimer le PDF ${deliveryNote.name} ?`)) {
+    return;
+  }
+
+  try {
+    await deleteDeliveryNoteFile(noteId);
+  } catch (error) {
+    showToast("Impossible de supprimer ce PDF.", "danger");
+    return;
+  }
+
+  state.deliveryNotes = state.deliveryNotes.filter((note) => note.id !== noteId);
+  saveState();
+  renderDeliveryNotes();
+  ui.deliveryNoteStatus.textContent = "";
+  showToast(`PDF ${deliveryNote.name} supprime.`);
 }
 
 function openLabelCameraPicker() {
@@ -886,6 +1015,11 @@ function fallbackToNativeCapture(mode) {
   } else {
     ui.barcodeCameraInput.click();
   }
+}
+
+function setDeliveryNoteBusy(isBusy) {
+  ui.importDeliveryNoteBtn.disabled = isBusy;
+  ui.importDeliveryNoteBtn.textContent = isBusy ? "Import en cours..." : "Importer un PDF";
 }
 
 function setOcrBusy(isBusy) {
@@ -1678,6 +1812,36 @@ function normalizeBarcode(value) {
   return value.trim();
 }
 
+function normalizeDeliveryNote(note) {
+  if (!note || !note.id || !note.name || !note.importedAt) {
+    return null;
+  }
+
+  return {
+    id: String(note.id),
+    name: normalizeFreeText(String(note.name)),
+    size: Number(note.size || 0),
+    importedAt: note.importedAt,
+  };
+}
+
+function looksLikePdf(file) {
+  return file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
+}
+
+function formatFileSize(size) {
+  const bytes = Number(size || 0);
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+  }
+
+  if (bytes >= 1024) {
+    return `${Math.round(bytes / 1024)} Ko`;
+  }
+
+  return `${bytes} o`;
+}
+
 function formatRouteCodeForDisplay(routeCode) {
   const normalized = normalizeRouteCode(routeCode || "");
   const match = normalized.match(/^R(\d+)(\d{5})$/);
@@ -1688,6 +1852,59 @@ function formatRouteCodeForDisplay(routeCode) {
   const routePrefix = `R${match[1]}`;
   const postalCode = match[2];
   return `${routePrefix} ${postalCode.slice(0, 2)} ${postalCode.slice(2)}`;
+}
+
+function openPdfDatabase() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error("indexeddb-unavailable"));
+      return;
+    }
+
+    const request = window.indexedDB.open(PDF_DB_NAME, 1);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(PDF_STORE_NAME)) {
+        db.createObjectStore(PDF_STORE_NAME);
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("indexeddb-open-failed"));
+  });
+}
+
+async function saveDeliveryNoteFile(noteId, file) {
+  const db = await openPdfDatabase();
+
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(PDF_STORE_NAME, "readwrite");
+      transaction.objectStore(PDF_STORE_NAME).put(file, noteId);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error || new Error("indexeddb-write-failed"));
+      transaction.onabort = () => reject(transaction.error || new Error("indexeddb-write-aborted"));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function deleteDeliveryNoteFile(noteId) {
+  const db = await openPdfDatabase();
+
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(PDF_STORE_NAME, "readwrite");
+      transaction.objectStore(PDF_STORE_NAME).delete(noteId);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error || new Error("indexeddb-delete-failed"));
+      transaction.onabort = () => reject(transaction.error || new Error("indexeddb-delete-aborted"));
+    });
+  } finally {
+    db.close();
+  }
 }
 
 function clamp(value, min, max) {

@@ -457,6 +457,7 @@ code {
 }
 
 .search-results,
+.document-list,
 .destination-grid,
 .baques-grid {
   display: grid;
@@ -469,6 +470,7 @@ code {
 
 .empty-card,
 .search-card,
+.document-card,
 .destination-card,
 .parcel-item {
   border-radius: var(--radius-md);
@@ -477,16 +479,49 @@ code {
 }
 
 .empty-card,
-.search-card {
+.search-card,
+.document-card {
   padding: 18px;
 }
 
 .search-card__meta,
+.document-card__meta,
 .destination-card__meta {
   margin-top: 12px;
   display: grid;
   gap: 8px;
   color: var(--text-soft);
+}
+
+.document-list {
+  min-height: 110px;
+}
+
+.document-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.document-card__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.document-card__title {
+  margin: 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.document-card__meta {
+  margin-top: 8px;
+}
+
+.document-card__action {
+  flex-shrink: 0;
 }
 
 .destination-card h3 {
@@ -877,6 +912,7 @@ code {
   .baque-card__meta,
   .parcel-item__top,
   .parcel-item__bottom,
+  .document-card,
   .modal__header,
   .actions,
   .move-group {

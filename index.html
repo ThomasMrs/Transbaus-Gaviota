@@ -320,6 +320,36 @@
 
           <div id="searchResults" class="search-results"></div>
         </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Documents</p>
+              <h2>Bon de livraison PDF</h2>
+            </div>
+            <span class="status-badge">Preparation</span>
+          </div>
+
+          <div class="form-stack">
+            <p class="field-help">
+              Importez un bon de livraison en PDF. Pour l'instant, le site le stocke seulement pour la suite.
+            </p>
+
+            <button id="importDeliveryNoteBtn" class="btn btn--secondary" type="button">
+              Importer un PDF
+            </button>
+
+            <input
+              id="deliveryNoteInput"
+              type="file"
+              accept="application/pdf,.pdf"
+              class="hidden-input"
+            >
+
+            <p id="deliveryNoteStatus" class="field-help"></p>
+            <div id="deliveryNoteList" class="document-list"></div>
+          </div>
+        </article>
       </section>
 
       <section class="section-block">
