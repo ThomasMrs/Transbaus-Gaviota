@@ -18,6 +18,11 @@ const ocr = {
   worker: null,
   busy: false,
 };
+const captureSession = {
+  stream: null,
+  mode: "label",
+  busy: false,
+};
 
 document.addEventListener("DOMContentLoaded", () => {
   cacheElements();
@@ -61,6 +66,14 @@ function cacheElements() {
   ui.reader = document.querySelector("#reader");
   ui.scannerStatus = document.querySelector("#scannerStatus");
   ui.closeScannerBtn = document.querySelector("#closeScannerBtn");
+  ui.captureModal = document.querySelector("#captureModal");
+  ui.captureVideo = document.querySelector("#captureVideo");
+  ui.captureGuide = document.querySelector("#captureGuide");
+  ui.captureTitle = document.querySelector("#captureTitle");
+  ui.captureHint = document.querySelector("#captureHint");
+  ui.captureStatus = document.querySelector("#captureStatus");
+  ui.takeCaptureBtn = document.querySelector("#takeCaptureBtn");
+  ui.closeCaptureBtn = document.querySelector("#closeCaptureBtn");
   ui.toastZone = document.querySelector("#toastZone");
   ui.barcodeFileReader = document.querySelector("#barcodeFileReader");
 }
@@ -79,11 +92,15 @@ function bindEvents() {
   ui.labelCameraInput.addEventListener("change", handleLabelImageChange);
   ui.labelLibraryInput.addEventListener("change", handleLabelImageChange);
   ui.closeScannerBtn.addEventListener("click", closeScanner);
+  ui.closeCaptureBtn.addEventListener("click", closeCaptureModal);
+  ui.takeCaptureBtn.addEventListener("click", handleCapturePhoto);
   ui.scannerModal.addEventListener("click", handleModalClick);
+  ui.captureModal.addEventListener("click", handleModalClick);
   ui.baquesGrid.addEventListener("click", handleBaqueGridClick);
   ui.baquesGrid.addEventListener("change", handleBaqueGridChange);
   window.addEventListener("beforeunload", () => {
     void stopScanner();
+    void stopCaptureStream();
     void stopOcrWorker();
   });
 }
@@ -316,10 +333,11 @@ function parcelTemplate(parcel) {
     )
     .join("");
   const displayDestination = getParcelDestinationDisplay(parcel);
+  const displayRouteCode = formatRouteCodeForDisplay(parcel.routeCode);
   const detailLines = [
     `Destination <strong>${escapeHtml(displayDestination)}</strong>`,
     parcel.client ? `Client : ${escapeHtml(parcel.client)}` : "",
-    parcel.routeCode ? `Numero destination : ${escapeHtml(parcel.routeCode)}` : "",
+    parcel.routeCode ? `Numero destination : ${escapeHtml(displayRouteCode)}` : "",
     parcel.routeLabel ? `Route : ${escapeHtml(parcel.routeLabel)}` : "",
     parcel.reference ? `Reference : ${escapeHtml(parcel.reference)}` : "",
     parcel.packageIndex ? `Colis : ${escapeHtml(parcel.packageIndex)}` : "",
@@ -330,7 +348,7 @@ function parcelTemplate(parcel) {
   ]
     .filter(Boolean)
     .join("<br>");
-  const tagLabel = parcel.routeCode || getDestinationShortLabel(displayDestination) || "Colis";
+  const tagLabel = displayRouteCode || getDestinationShortLabel(displayDestination) || "Colis";
   const parcelHeading = getParcelIdentifier(parcel);
 
   return `
@@ -423,7 +441,7 @@ function renderSearchResults() {
         <article class="search-card">
           <h3>${escapeHtml(getParcelIdentifier(parcel))}</h3>
           <div class="search-card__meta">
-            ${parcel.routeCode ? `<span><strong>Numero destination :</strong> ${escapeHtml(parcel.routeCode)}</span>` : ""}
+            ${parcel.routeCode ? `<span><strong>Numero destination :</strong> ${escapeHtml(formatRouteCodeForDisplay(parcel.routeCode))}</span>` : ""}
             <span><strong>Destination :</strong> ${escapeHtml(displayDestination)}</span>
             ${parcel.client ? `<span><strong>Client :</strong> ${escapeHtml(parcel.client)}</span>` : ""}
             ${parcel.description ? `<span><strong>Description :</strong> ${escapeHtml(parcel.description)}</span>` : ""}
@@ -523,6 +541,10 @@ function handleModalClick(event) {
   if (event.target instanceof HTMLElement && event.target.dataset.closeScanner === "true") {
     closeScanner();
   }
+
+  if (event.target instanceof HTMLElement && event.target.dataset.closeCapture === "true") {
+    closeCaptureModal();
+  }
 }
 
 function openLabelCameraPicker() {
@@ -530,7 +552,7 @@ function openLabelCameraPicker() {
     return;
   }
 
-  ui.labelCameraInput.click();
+  void openCaptureModal("label");
 }
 
 function openLabelLibraryPicker() {
@@ -546,7 +568,7 @@ function openBarcodeCameraPicker() {
     return;
   }
 
-  ui.barcodeCameraInput.click();
+  void openCaptureModal("barcode");
 }
 
 function openBarcodeLibraryPicker() {
@@ -559,6 +581,14 @@ function openBarcodeLibraryPicker() {
 
 async function handleBarcodeImageChange(event) {
   const file = event.target.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  await processBarcodeFile(file);
+}
+
+async function processBarcodeFile(file) {
   if (!file) {
     return;
   }
@@ -612,6 +642,14 @@ async function handleLabelImageChange(event) {
     return;
   }
 
+  await processLabelFile(file);
+}
+
+async function processLabelFile(file) {
+  if (!file) {
+    return;
+  }
+
   if (typeof window.Tesseract?.createWorker !== "function") {
     showToast("Le module OCR n'est pas disponible.", "danger");
     resetLabelInputs();
@@ -642,6 +680,211 @@ async function handleLabelImageChange(event) {
   } finally {
     setOcrBusy(false);
     resetLabelInputs();
+  }
+}
+
+async function openCaptureModal(mode) {
+  if (captureSession.busy) {
+    return;
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    fallbackToNativeCapture(mode);
+    return;
+  }
+
+  if (scanner.active) {
+    await closeScanner();
+  }
+
+  captureSession.mode = mode;
+  configureCaptureModal(mode);
+  ui.captureStatus.textContent = "Demande d'acces a la camera...";
+  ui.takeCaptureBtn.disabled = true;
+  ui.captureModal.classList.remove("hidden");
+  ui.captureModal.setAttribute("aria-hidden", "false");
+
+  try {
+    await startCaptureStream();
+    ui.captureStatus.textContent = mode === "label"
+      ? "Cadrez l'etiquette dans le rectangle, puis prenez la photo."
+      : "Centrez le code-barres dans le rectangle, puis prenez la photo.";
+  } catch (error) {
+    await closeCaptureModal({ silent: true });
+    showToast("Impossible d'ouvrir la camera integree. Utilisez Choisir une photo si besoin.", "danger");
+  }
+}
+
+function configureCaptureModal(mode) {
+  const isLabelMode = mode === "label";
+
+  ui.captureTitle.textContent = isLabelMode ? "Cadrer l'etiquette" : "Cadrer le code-barres";
+  ui.captureHint.textContent = isLabelMode
+    ? "Placez l'etiquette entiere dans le cadre, bien droite et nette, puis prenez la photo."
+    : "Placez le code-barres au centre du cadre, evitez les reflets, puis prenez la photo.";
+  ui.takeCaptureBtn.textContent = "Prendre la photo";
+  ui.captureGuide.classList.toggle("capture-guide--label", isLabelMode);
+  ui.captureGuide.classList.toggle("capture-guide--barcode", !isLabelMode);
+}
+
+async function startCaptureStream() {
+  await stopCaptureStream();
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: { ideal: "environment" },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+    },
+    audio: false,
+  });
+
+  captureSession.stream = stream;
+  ui.captureVideo.srcObject = stream;
+
+  await ui.captureVideo.play();
+  ui.takeCaptureBtn.disabled = false;
+}
+
+async function closeCaptureModal(options = {}) {
+  if (captureSession.busy && !options.force) {
+    return;
+  }
+
+  await stopCaptureStream();
+  ui.captureModal.classList.add("hidden");
+  ui.captureModal.setAttribute("aria-hidden", "true");
+
+  if (!options.silent) {
+    ui.captureStatus.textContent = "";
+  }
+}
+
+async function stopCaptureStream() {
+  if (captureSession.stream) {
+    captureSession.stream.getTracks().forEach((track) => track.stop());
+    captureSession.stream = null;
+  }
+
+  if (ui.captureVideo) {
+    ui.captureVideo.pause();
+    ui.captureVideo.srcObject = null;
+  }
+}
+
+async function handleCapturePhoto() {
+  if (captureSession.busy || !ui.captureVideo.videoWidth || !ui.captureVideo.videoHeight) {
+    return;
+  }
+
+  captureSession.busy = true;
+  ui.takeCaptureBtn.disabled = true;
+  ui.takeCaptureBtn.textContent = "Preparation...";
+  ui.captureStatus.textContent = "Photo prise. Preparation de l'image...";
+
+  const mode = captureSession.mode;
+
+  try {
+    const file = await captureCurrentFrame(mode);
+    await closeCaptureModal({ force: true, silent: true });
+
+    if (mode === "label") {
+      await processLabelFile(file);
+    } else {
+      await processBarcodeFile(file);
+    }
+  } catch (error) {
+    ui.captureStatus.textContent = "Impossible de prendre la photo. Reessayez avec une image plus stable.";
+    showToast("Impossible de prendre la photo. Reessayez.", "danger");
+  } finally {
+    captureSession.busy = false;
+    ui.takeCaptureBtn.disabled = false;
+    ui.takeCaptureBtn.textContent = "Prendre la photo";
+  }
+}
+
+async function captureCurrentFrame(mode) {
+  const crop = getCaptureCropArea(mode);
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("canvas-unavailable");
+  }
+
+  canvas.width = Math.max(1, Math.round(crop.width));
+  canvas.height = Math.max(1, Math.round(crop.height));
+  context.drawImage(
+    ui.captureVideo,
+    crop.x,
+    crop.y,
+    crop.width,
+    crop.height,
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  );
+
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (result) => {
+        if (result) {
+          resolve(result);
+        } else {
+          reject(new Error("blob-unavailable"));
+        }
+      },
+      "image/jpeg",
+      0.92,
+    );
+  });
+
+  return new File([blob], `${mode}-${Date.now()}.jpg`, { type: "image/jpeg" });
+}
+
+function getCaptureCropArea(mode) {
+  const sourceWidth = ui.captureVideo.videoWidth;
+  const sourceHeight = ui.captureVideo.videoHeight;
+  const videoRect = ui.captureVideo.getBoundingClientRect();
+  const guideRect = ui.captureGuide.getBoundingClientRect();
+  const displayWidth = videoRect.width;
+  const displayHeight = videoRect.height;
+
+  if (!sourceWidth || !sourceHeight || !displayWidth || !displayHeight) {
+    return { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
+  }
+
+  const scale = Math.max(displayWidth / sourceWidth, displayHeight / sourceHeight);
+  const renderedWidth = sourceWidth * scale;
+  const renderedHeight = sourceHeight * scale;
+  const overflowX = Math.max(0, (renderedWidth - displayWidth) / 2);
+  const overflowY = Math.max(0, (renderedHeight - displayHeight) / 2);
+
+  let x = (guideRect.left - videoRect.left + overflowX) / scale;
+  let y = (guideRect.top - videoRect.top + overflowY) / scale;
+  let width = guideRect.width / scale;
+  let height = guideRect.height / scale;
+
+  const extraMargin = mode === "label" ? 0.04 : 0.1;
+  x -= width * extraMargin;
+  y -= height * extraMargin;
+  width *= 1 + extraMargin * 2;
+  height *= 1 + extraMargin * 2;
+
+  x = clamp(x, 0, sourceWidth - 1);
+  y = clamp(y, 0, sourceHeight - 1);
+  width = clamp(width, 1, sourceWidth - x);
+  height = clamp(height, 1, sourceHeight - y);
+
+  return { x, y, width, height };
+}
+
+function fallbackToNativeCapture(mode) {
+  if (mode === "label") {
+    ui.labelCameraInput.click();
+  } else {
+    ui.barcodeCameraInput.click();
   }
 }
 
@@ -839,15 +1082,27 @@ function looksLikeMetaLine(line) {
 function extractCommandeNumber(lines, text) {
   const commandIndex = lines.findIndex((line) => /COMMANDE/i.test(line));
   if (commandIndex >= 0) {
-    const candidates = lines
-      .slice(commandIndex, commandIndex + 4)
-      .flatMap((line) => [...line.matchAll(/\b\d{5,10}\b/g)].map((match) => match[0]))
-      .filter((value, index, array) => array.indexOf(value) === index)
-      .sort((left, right) => left.length - right.length);
+    const nearbyLines = lines.slice(commandIndex, commandIndex + 5);
+    const inlineMatch = nearbyLines[0]?.match(/COMMANDE[^\dA-Z]*([0-9]{5,10})/i);
+    if (inlineMatch) {
+      return inlineMatch[1].replace(/\s+/g, "");
+    }
 
-    const preferred = candidates.find((value) => value.length >= 5 && value.length <= 8);
-    if (preferred) {
-      return preferred;
+    const candidates = nearbyLines
+      .flatMap((line, offset) =>
+        [...line.matchAll(/\b\d{5,10}\b/g)].map((match) => ({
+          value: match[0],
+          line,
+          offset,
+        })),
+      )
+      .filter((candidate, index, array) =>
+        array.findIndex((item) => item.value === candidate.value) === index,
+      )
+      .sort((left, right) => getCommandeCandidateScore(right) - getCommandeCandidateScore(left));
+
+    if (candidates[0]) {
+      return candidates[0].value.replace(/\s+/g, "");
     }
   }
 
@@ -857,6 +1112,34 @@ function extractCommandeNumber(lines, text) {
   }
 
   return "";
+}
+
+function getCommandeCandidateScore(candidate) {
+  const normalizedLine = normalizeFreeText(candidate.line || "");
+  const normalizedValue = String(candidate.value || "").replace(/\s+/g, "");
+  let score = 0;
+
+  if (/COMMANDE/i.test(normalizedLine)) {
+    score += 50;
+  }
+
+  if (new RegExp(`^${normalizedValue}$`).test(normalizedLine)) {
+    score += 18;
+  }
+
+  if (normalizedValue.length >= 6 && normalizedValue.length <= 8) {
+    score += 14;
+  } else if (normalizedValue.length === 5) {
+    score += 4;
+  }
+
+  if (normalizedValue.startsWith("0")) {
+    score += 6;
+  }
+
+  score -= candidate.offset * 4;
+
+  return score;
 }
 
 function extractRouteCode(lines, text) {
@@ -1235,14 +1518,16 @@ function normalizeFreeText(value) {
 function normalizeParcelData(parcel) {
   const barcode = normalizeBarcode(parcel.barcode || "");
   const routeLabel = normalizeFreeText(parcel.routeLabel || "");
-  const destination = sanitizeDestination(parcel.destination || "");
+  const rawDestination = sanitizeDestination(parcel.destination || "");
   const shippingDate = normalizeFreeText(parcel.shippingDate || "");
-  const routeCode = reconcileRouteCode(parcel.routeCode || "", routeLabel, destination);
+  const routeCode = reconcileRouteCode(parcel.routeCode || "", routeLabel, rawDestination);
+  const destination = reconcileDestination(rawDestination, routeCode);
   const packageIndex = sanitizePackageIndex(parcel.packageIndex || "", shippingDate);
+  const normalizedBarcode = reconcileBarcode(barcode, destination, routeCode);
 
   return {
     ...parcel,
-    barcode,
+    barcode: normalizedBarcode,
     routeCode,
     destination,
     client: normalizeFreeText(parcel.client || ""),
@@ -1256,7 +1541,7 @@ function normalizeParcelData(parcel) {
 }
 
 function getParcelDestinationDisplay(parcel) {
-  return parcel.destination || parcel.routeCode || "Sans destination";
+  return parcel.destination || formatRouteCodeForDisplay(parcel.routeCode) || "Sans destination";
 }
 
 function getParcelDestinationKey(parcel) {
@@ -1264,7 +1549,7 @@ function getParcelDestinationKey(parcel) {
 }
 
 function getParcelIdentifier(parcel) {
-  return parcel.barcode || parcel.routeCode || "Sans code-barres";
+  return parcel.barcode || formatRouteCodeForDisplay(parcel.routeCode) || "Sans code-barres";
 }
 
 function sanitizeDestination(value) {
@@ -1327,6 +1612,17 @@ function sanitizePackageIndex(packageIndex, shippingDate) {
   return normalized;
 }
 
+function reconcileDestination(destination, routeCode) {
+  const routePostalCode = routeCode.match(/(\d{5})$/)?.[1] || "";
+  const destinationPostalCode = extractPostalCode(destination);
+
+  if (!routePostalCode || !destinationPostalCode || routePostalCode === destinationPostalCode) {
+    return destination;
+  }
+
+  return normalizeFreeText(destination.replace(destinationPostalCode, routePostalCode));
+}
+
 function reconcileRouteCode(routeCode, routeLabel, destination) {
   const normalizedRouteCode = normalizeRouteCode(routeCode || "");
   const postalCode = extractPostalCode(destination);
@@ -1342,6 +1638,21 @@ function reconcileRouteCode(routeCode, routeLabel, destination) {
   }
 
   return normalizedRouteCode;
+}
+
+function reconcileBarcode(barcode, destination, routeCode) {
+  const normalizedBarcode = normalizeBarcode(barcode);
+  const postalCode = extractPostalCode(destination);
+  const routePostalCode = routeCode.match(/(\d{5})$/)?.[1] || "";
+
+  if (
+    normalizedBarcode.length === 5
+    && (normalizedBarcode === postalCode || normalizedBarcode === routePostalCode)
+  ) {
+    return "";
+  }
+
+  return normalizedBarcode;
 }
 
 function extractPostalCode(destination) {
@@ -1360,11 +1671,27 @@ function renderRouteCodeMeta(parcels) {
     return "";
   }
 
-  return `<span><strong>Route :</strong> ${escapeHtml(routeCodes[0])}</span>`;
+  return `<span><strong>Route :</strong> ${escapeHtml(formatRouteCodeForDisplay(routeCodes[0]))}</span>`;
 }
 
 function normalizeBarcode(value) {
   return value.trim();
+}
+
+function formatRouteCodeForDisplay(routeCode) {
+  const normalized = normalizeRouteCode(routeCode || "");
+  const match = normalized.match(/^R(\d+)(\d{5})$/);
+  if (!match) {
+    return normalized;
+  }
+
+  const routePrefix = `R${match[1]}`;
+  const postalCode = match[2];
+  return `${routePrefix} ${postalCode.slice(0, 2)} ${postalCode.slice(2)}`;
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function showToast(message, type = "default") {

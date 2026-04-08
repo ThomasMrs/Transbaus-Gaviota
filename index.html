@@ -7,13 +7,16 @@
     name="description"
     content="Application locale de tri de colis par baques avec scan de code-barres, recherche et suivi par destination."
   >
-  <title>Transbaus Gaviota</title>
+  <meta name="application-name" content="Le Baus du Tri">
+  <title>Le Baus du Tri</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
     href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap"
     rel="stylesheet"
   >
+  <link rel="icon" type="image/svg+xml" href="assets/le-baus-du-tri-icon.svg">
+  <link rel="shortcut icon" href="assets/le-baus-du-tri-icon.svg">
   <link rel="stylesheet" href="styles.css">
   <script src="vendor/html5-qrcode.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
@@ -51,7 +54,7 @@
       </div>
 
       <aside class="panel panel--highlight">
-        <div class="hero__side-label">Flux conseille</div>
+        <div class="hero__side-label">Flux recommande</div>
         <ol class="flow-list">
           <li>Choisir la baque actuelle du colis.</li>
           <li>Choisir une photo existante ou prendre une photo de l'etiquette.</li>
@@ -191,12 +194,12 @@
                 <div class="capture-card__head">
                   <div>
                     <p class="capture-card__eyebrow">Conseille sur iPhone</p>
-                    <h3>Photo etiquette complete</h3>
+                    <h3>Photo de l'etiquette complete</h3>
                   </div>
                   <span class="capture-badge">Auto</span>
                 </div>
                 <p class="capture-card__copy">
-                  Choisissez une image existante ou prenez une nouvelle photo de l'etiquette. Le site essaie de remplir automatiquement le numero destination,
+                  Choisissez une image existante ou prenez une nouvelle photo de l'etiquette avec un cadre guide. Le site essaie de remplir automatiquement le numero destination,
                   la destination complete, le client, la date, le poids et les autres champs.
                 </p>
                 <div class="capture-card__actions">
@@ -371,6 +374,37 @@
         Si besoin, vous pouvez aussi choisir une image du code-barres.
       </p>
       <p id="scannerStatus" class="scanner-status"></p>
+    </div>
+  </div>
+
+  <div id="captureModal" class="modal hidden" aria-hidden="true">
+    <div class="modal__backdrop" data-close-capture="true"></div>
+    <div class="modal__dialog modal__dialog--capture" role="dialog" aria-modal="true" aria-labelledby="captureTitle">
+      <div class="modal__header">
+        <div>
+          <p class="section-kicker">Prise de photo</p>
+          <h2 id="captureTitle">Cadrer l'etiquette</h2>
+        </div>
+        <button id="closeCaptureBtn" class="icon-btn" type="button">
+          Fermer
+        </button>
+      </div>
+
+      <div class="capture-preview">
+        <video id="captureVideo" class="capture-video" autoplay playsinline muted></video>
+        <div id="captureGuide" class="capture-guide capture-guide--label" aria-hidden="true"></div>
+      </div>
+
+      <p id="captureHint" class="scanner-help">
+        Placez l'etiquette entiere dans le cadre, bien droite et nette, puis prenez la photo.
+      </p>
+      <p id="captureStatus" class="scanner-status"></p>
+
+      <div class="capture-modal__actions">
+        <button id="takeCaptureBtn" class="btn btn--primary" type="button">
+          Prendre la photo
+        </button>
+      </div>
     </div>
   </div>
 

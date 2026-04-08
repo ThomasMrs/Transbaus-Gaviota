@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Le Baus du Tri">
+  <defs>
+    <linearGradient id="boxFront" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd86b"/>
+      <stop offset="100%" stop-color="#f7a900"/>
+    </linearGradient>
+    <linearGradient id="boxSide" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffcc47"/>
+      <stop offset="100%" stop-color="#f2a300"/>
+    </linearGradient>
+    <linearGradient id="boxFlap" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd96f"/>
+      <stop offset="100%" stop-color="#f4b01e"/>
+    </linearGradient>
+  </defs>
+
+  <path d="M47 214 256 124l209 90-209 95z" fill="#2f3a49"/>
+  <path d="M47 214v153l209 96V309z" fill="url(#boxFront)"/>
+  <path d="M465 214v153l-209 96V309z" fill="url(#boxSide)"/>
+  <path d="M47 214 16 251c-10 12-5 31 10 37l147 57c12 5 26 1 35-8l48-28z" fill="url(#boxFlap)"/>
+  <path d="M465 214 496 251c10 12 5 31-10 37l-147 57c-12 5-26 1-35-8l-48-28z" fill="#ffb70f"/>
+  <rect x="376" y="335" width="58" height="62" rx="14" fill="#edf3fb"/>
+  <circle cx="256" cy="127" r="73" fill="#ff4a22"/>
+  <path d="m223 126 27 27 57-60" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="18"/>
+</svg>
