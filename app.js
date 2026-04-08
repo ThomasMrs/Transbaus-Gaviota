@@ -1395,6 +1395,7 @@ function compareDeliveryNoteEntries(entries) {
   }
 
   const registeredCommandCounts = buildRegisteredCommandCounts();
+  const registeredCommandInfo = buildRegisteredCommandInfo();
   const missingEntries = [];
   let totalExpectedCount = 0;
   let totalRegisteredCount = 0;
@@ -1409,8 +1410,11 @@ function compareDeliveryNoteEntries(entries) {
     totalRegisteredCount += matchedCount;
 
     if (missingCount > 0) {
+      const registeredInfo = registeredCommandInfo.get(entry.commandNumber);
       missingEntries.push({
         ...entry,
+        client: registeredInfo?.client || entry.client,
+        city: registeredInfo?.city || entry.city,
         expectedCount,
         registeredCount,
         missingCount,
@@ -2497,12 +2501,13 @@ function parseStructuredDeliveryNoteLines(lines) {
     }
 
     const barcodeInfo = findNearbyDeliveryBarcode(lines, index, commandNumber);
+    const resolvedContext = resolveStructuredDeliveryContext(lines, index, currentContext);
     entries.push({
       commandNumber,
-      expectedCount: pendingPackageCount || barcodeInfo?.packageCount || 1,
-      client: currentContext.client,
-      city: currentContext.city,
-      rawContext: buildDeliveryEntryContext(currentContext, line, barcodeInfo?.line || ""),
+      expectedCount: resolveStructuredDeliveryPackageCount(lines, index, pendingPackageCount),
+      client: resolvedContext.client,
+      city: resolvedContext.city,
+      rawContext: buildDeliveryEntryContext(resolvedContext, line, barcodeInfo?.line || ""),
     });
 
     pendingPackageCount = 0;
@@ -2517,6 +2522,173 @@ function createDeliveryContext() {
     city: "",
     blockLines: [],
   };
+}
+
+function resolveStructuredDeliveryContext(lines, commandIndex, fallbackContext) {
+  const nearbyBlockLines = collectNearbyDeliveryContextLines(lines, commandIndex);
+  const nearbyContext = nearbyBlockLines.length
+    ? extractDeliveryContextFromBlock(nearbyBlockLines)
+    : createDeliveryContext();
+
+  return chooseBestDeliveryContext([nearbyContext, fallbackContext]);
+}
+
+function collectNearbyDeliveryContextLines(lines, commandIndex) {
+  const blockLines = [];
+  const startIndex = Math.max(0, commandIndex - 12);
+
+  for (let index = startIndex; index < commandIndex; index += 1) {
+    const candidate = lines[index];
+    if (!candidate) {
+      continue;
+    }
+
+    if (isDeliveryPageMetaLine(candidate) || isDeliveryAddressHeaderLine(candidate)) {
+      blockLines.length = 0;
+      continue;
+    }
+
+    if (!looksLikeDeliveryContextLine(candidate)) {
+      continue;
+    }
+
+    blockLines.push(candidate);
+  }
+
+  return blockLines.slice(-6);
+}
+
+function looksLikeDeliveryContextLine(line) {
+  const normalizedLine = normalizeDeliveryTextLine(line);
+  if (!normalizedLine || isDeliveryContextSeparatorLine(normalizedLine)) {
+    return false;
+  }
+
+  if (!/[A-ZÀ-Ý]/u.test(normalizedLine)) {
+    return false;
+  }
+
+  return !/^\d+(?:\s+\d+)*$/.test(normalizedLine);
+}
+
+function isDeliveryContextSeparatorLine(line) {
+  return isDeliveryDetailHeaderLine(line)
+    || isDeliveryPageMetaLine(line)
+    || isDeliveryAddressHeaderLine(line)
+    || Boolean(extractDeliveryCommandNumber(line))
+    || Boolean(extractDeliveryBarcodeInfo(line))
+    || Boolean(extractDeliveryPackageCountFromSummaryLine(line))
+    || /\bPOIDS\b|\bKG\b/i.test(line);
+}
+
+function chooseBestDeliveryContext(candidates) {
+  const normalizedCandidates = candidates
+    .map((candidate) => normalizeDeliveryContextCandidate(candidate))
+    .filter((candidate) => candidate.client || candidate.city || candidate.blockLines.length);
+
+  if (!normalizedCandidates.length) {
+    return createDeliveryContext();
+  }
+
+  return normalizedCandidates.sort((left, right) => scoreDeliveryContext(right) - scoreDeliveryContext(left))[0];
+}
+
+function normalizeDeliveryContextCandidate(candidate) {
+  return {
+    client: sanitizeDeliveryClientLabel(candidate?.client || ""),
+    city: sanitizeDeliveryCityLabel(candidate?.city || ""),
+    blockLines: Array.isArray(candidate?.blockLines) ? candidate.blockLines.filter(Boolean) : [],
+  };
+}
+
+function scoreDeliveryContext(candidate) {
+  let score = candidate.blockLines.length;
+
+  if (candidate.client) {
+    score += 18 + getDeliveryTextQualityScore(candidate.client, "client");
+  }
+
+  if (candidate.city) {
+    score += 18 + getDeliveryTextQualityScore(candidate.city, "city");
+  }
+
+  if (candidate.client && candidate.city && candidate.client !== candidate.city) {
+    score += 6;
+  }
+
+  return score;
+}
+
+function getDeliveryTextQualityScore(value, kind) {
+  const normalizedValue = normalizeFreeText(value);
+  if (!normalizedValue) {
+    return -100;
+  }
+
+  let score = 0;
+  const tokens = normalizedValue.split(" ").filter(Boolean);
+
+  if (tokens.length >= 2) {
+    score += 6;
+  }
+
+  if (kind === "client" && /\b(?:SARL|SAS|SASU|EURL|SA|SNC)\b/i.test(normalizedValue)) {
+    score += 12;
+  }
+
+  if (kind === "city" && /[-']/u.test(normalizedValue)) {
+    score += 3;
+  }
+
+  if (looksSuspiciousDeliveryText(normalizedValue, kind)) {
+    score -= 30;
+  }
+
+  return score;
+}
+
+function looksSuspiciousDeliveryText(value, kind = "generic") {
+  const normalizedValue = normalizeFreeText(value);
+  if (!normalizedValue) {
+    return true;
+  }
+
+  if (/\d/.test(normalizedValue)) {
+    return true;
+  }
+
+  const tokens = normalizedValue.split(" ").filter(Boolean);
+  if (!tokens.length) {
+    return true;
+  }
+
+  if (hasRepeatedDeliveryTokens(tokens)) {
+    return true;
+  }
+
+  if (
+    kind !== "client"
+    && tokens.length > 1
+    && tokens.every((token) => normalizeDeliveryTokenKey(token).length <= 3)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function hasRepeatedDeliveryTokens(tokens) {
+  return tokens.some((token, index) => {
+    if (index === 0) {
+      return false;
+    }
+
+    return normalizeDeliveryTokenKey(token) === normalizeDeliveryTokenKey(tokens[index - 1]);
+  });
+}
+
+function normalizeDeliveryTokenKey(value) {
+  return String(value).replace(/[^A-ZÀ-Ý]/giu, "").toUpperCase();
 }
 
 function isDeliveryAddressHeaderLine(line) {
@@ -2577,6 +2749,16 @@ function findNearbyDeliveryBarcode(lines, startIndex, expectedCommandNumber = ""
   }
 
   return null;
+}
+
+function resolveStructuredDeliveryPackageCount(lines, commandIndex, pendingPackageCount) {
+  if (pendingPackageCount) {
+    return pendingPackageCount;
+  }
+
+  const startIndex = Math.max(0, commandIndex - 6);
+  const endIndex = Math.min(lines.length, commandIndex + 4);
+  return extractDeliveryPackageCount(lines.slice(startIndex, endIndex), commandIndex - startIndex);
 }
 
 function buildDeliveryEntryContext(context, commandLine, barcodeLine) {
@@ -2655,6 +2837,10 @@ function sliceUppercaseClientTokens(value) {
       break;
     }
 
+    if (/\d/.test(token)) {
+      break;
+    }
+
     if (isDeliveryAddressToken(token)) {
       break;
     }
@@ -2687,25 +2873,31 @@ function extractDeliveryContextFromBlock(lines) {
 }
 
 function extractDeliveryClientFromBlock(lines) {
-  for (const line of lines) {
+  const candidates = [];
+
+  lines.forEach((line, index) => {
     const normalizedLine = normalizeDeliveryTextLine(line.replace(/[©@]/g, " "));
     const payload = normalizedLine.replace(/^(?:\d+\s+)?\d{5,6}\s+/, "");
 
     if (payload === normalizedLine && /\b\d{5}\b/.test(normalizedLine)) {
-      continue;
+      return;
     }
 
-    const clientName = sliceUppercaseClientTokens(payload);
+    const clientName = sanitizeDeliveryClientLabel(sliceUppercaseClientTokens(payload));
     if (clientName) {
-      return clientName;
+      candidates.push({
+        value: clientName,
+        score: getDeliveryTextQualityScore(clientName, "client") - index,
+      });
     }
-  }
+  });
 
-  return "";
+  return candidates.sort((left, right) => right.score - left.score)[0]?.value || "";
 }
 
 function extractDeliveryCityFromBlock(lines) {
   const normalizedLines = lines.map((line) => normalizeDeliveryTextLine(line));
+  const candidates = [];
 
   for (let index = 0; index < normalizedLines.length; index += 1) {
     const line = normalizedLines[index];
@@ -2750,16 +2942,57 @@ function extractDeliveryCityFromBlock(lines) {
     }
 
     if (city) {
-      return city;
+      const sanitizedCity = sanitizeDeliveryCityLabel(city);
+      if (sanitizedCity) {
+        candidates.push({
+          value: sanitizedCity,
+          score: getDeliveryTextQualityScore(sanitizedCity, "city") - index,
+        });
+      }
     }
   }
 
-  return "";
+  return candidates.sort((left, right) => right.score - left.score)[0]?.value || "";
 }
 
 function normalizeDeliveryClientName(value) {
   return normalizeDeliveryTextLine(value)
     .replace(/([A-ZÀ-Ý]{3,})(SARL|SAS|SASU|EURL)\b/gu, "$1 $2");
+}
+
+function sanitizeDeliveryClientLabel(value) {
+  const cleaned = collapseRepeatedDeliveryTokens(
+    normalizeDeliveryClientName(value)
+      .split(" ")
+      .filter((token) => token && !/\d/.test(token))
+      .join(" "),
+  );
+
+  return looksSuspiciousDeliveryText(cleaned, "client") ? "" : cleaned;
+}
+
+function sanitizeDeliveryCityLabel(value) {
+  const cleaned = collapseRepeatedDeliveryTokens(
+    normalizeDeliveryTextLine(value)
+      .split(" ")
+      .filter((token) => token && !/\d/.test(token))
+      .join(" "),
+  );
+
+  return looksSuspiciousDeliveryText(cleaned, "city") ? "" : cleaned;
+}
+
+function collapseRepeatedDeliveryTokens(value) {
+  const tokens = normalizeFreeText(value).split(" ").filter(Boolean);
+  const collapsedTokens = [];
+
+  tokens.forEach((token) => {
+    if (!collapsedTokens.length || normalizeDeliveryTokenKey(collapsedTokens[collapsedTokens.length - 1]) !== normalizeDeliveryTokenKey(token)) {
+      collapsedTokens.push(token);
+    }
+  });
+
+  return normalizeFreeText(collapsedTokens.join(" "));
 }
 
 function looksLikeAllowedLowercaseClientToken(token) {
@@ -2778,7 +3011,7 @@ function collectDeliveryCityTokens(value) {
   const cityTokens = [];
 
   for (const token of tokens) {
-    if (/^\d+$/.test(token) || looksLikeFrenchPhoneNumber(token)) {
+    if (/^\d+$/.test(token) || /\d/.test(token) || looksLikeFrenchPhoneNumber(token)) {
       break;
     }
 
@@ -2802,18 +3035,18 @@ function collectDeliveryTrailingUppercaseFragment(value) {
 
 function joinDeliveryCityFragments(left, right) {
   if (!left) {
-    return right;
+    return sanitizeDeliveryCityLabel(right);
   }
 
   if (!right) {
-    return left;
+    return sanitizeDeliveryCityLabel(left);
   }
 
   if (right.length === 1 || /-$/.test(left) || /-[A-ZÀ-Ý]+$/u.test(left)) {
-    return `${left}${right}`;
+    return sanitizeDeliveryCityLabel(`${left}${right}`);
   }
 
-  return `${left} ${right}`;
+  return sanitizeDeliveryCityLabel(`${left} ${right}`);
 }
 
 function looksLikeFrenchPhoneNumber(value) {
@@ -2894,16 +3127,36 @@ function getDeliveryPackageCountScore(candidate, commandIndex) {
 }
 
 function dedupeDeliveryEntries(entries) {
-  const seen = new Set();
+  const bestEntries = new Map();
 
-  return entries.filter((entry) => {
-    if (!entry.commandNumber || seen.has(entry.commandNumber)) {
-      return false;
+  entries.forEach((entry, index) => {
+    if (!entry.commandNumber) {
+      return;
     }
 
-    seen.add(entry.commandNumber);
-    return true;
+    const current = bestEntries.get(entry.commandNumber);
+    const candidateScore = scoreDeliveryEntryCandidate(entry);
+
+    if (!current || candidateScore > current.score) {
+      bestEntries.set(entry.commandNumber, {
+        entry,
+        score: candidateScore,
+        orderIndex: current?.orderIndex ?? index,
+      });
+    }
   });
+
+  return [...bestEntries.values()]
+    .sort((left, right) => left.orderIndex - right.orderIndex)
+    .map((item) => item.entry);
+}
+
+function scoreDeliveryEntryCandidate(entry) {
+  return scoreDeliveryContext({
+    client: entry.client || "",
+    city: entry.city || "",
+    blockLines: [],
+  }) + (Number(entry.expectedCount || 0) > 0 && Number(entry.expectedCount || 0) < 10 ? 4 : 0);
 }
 
 function buildRegisteredCommandSet() {
@@ -2924,6 +3177,54 @@ function buildRegisteredCommandCounts() {
     map.set(barcode, (map.get(barcode) || 0) + 1);
     return map;
   }, new Map());
+}
+
+function buildRegisteredCommandInfo() {
+  const groupedInfo = state.parcels.reduce((map, parcel) => {
+    const barcode = normalizeBarcode(parcel.barcode || "");
+    if (!/^\d{5,10}$/.test(barcode)) {
+      return map;
+    }
+
+    const nextBucket = map.get(barcode) || {
+      clients: new Map(),
+      cities: new Map(),
+    };
+    const client = normalizeFreeText(parcel.client || "");
+    const city = getParcelCityLabel(parcel);
+
+    if (client) {
+      nextBucket.clients.set(client, (nextBucket.clients.get(client) || 0) + 1);
+    }
+
+    if (city) {
+      nextBucket.cities.set(city, (nextBucket.cities.get(city) || 0) + 1);
+    }
+
+    map.set(barcode, nextBucket);
+    return map;
+  }, new Map());
+
+  return new Map(
+    [...groupedInfo.entries()].map(([barcode, bucket]) => [
+      barcode,
+      {
+        client: getMostCommonDeliveryValue(bucket.clients),
+        city: getMostCommonDeliveryValue(bucket.cities),
+      },
+    ]),
+  );
+}
+
+function getMostCommonDeliveryValue(counts) {
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "fr", { sensitivity: "base" }))[0]?.[0] || "";
+}
+
+function getParcelCityLabel(parcel) {
+  const destination = sanitizeDestination(parcel.destination || "");
+  const match = destination.match(/\b\d{5}\s+(.+)$/);
+  return normalizeFreeText(match ? match[1] : destination);
 }
 
 function looksLikeDeliveryDate(value) {
