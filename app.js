@@ -1,7 +1,10 @@
 const STORAGE_KEY = "transbaus-gaviota-state-v1";
 const COLLAPSE_STORAGE_KEY = "le-baus-du-tri-collapse-v1";
 const ACCESS_STORAGE_KEY = "transbaus-gaviota-access-v1";
+const ACCESS_RATE_LIMIT_STORAGE_KEY = "transbaus-gaviota-access-rate-v1";
 const ACCESS_PASSWORD = "2005";
+const ACCESS_FAILED_ATTEMPTS_LIMIT = 3;
+const ACCESS_LOCK_DURATION_MS = 10_000;
 const PDF_DB_NAME = "le-baus-du-tri-documents-v1";
 const PDF_STORE_NAME = "delivery-notes";
 const PDFJS_VERSION = "5.6.205";
@@ -25,6 +28,7 @@ const DEFAULT_BAQUES = [
 
 const state = loadState();
 const collapseState = loadCollapseState();
+const accessRateLimit = loadAccessRateLimit();
 const ui = {};
 const scanner = {
   instance: null,
@@ -45,6 +49,7 @@ const deliveryNoteAnalysis = {
   busy: false,
 };
 let pdfjsLibPromise = null;
+let loginLockCountdownId = null;
 
 document.addEventListener("DOMContentLoaded", () => {
   cacheElements();
@@ -58,6 +63,7 @@ function cacheElements() {
   ui.loginForm = document.querySelector("#loginForm");
   ui.loginPasswordInput = document.querySelector("#loginPasswordInput");
   ui.loginStatus = document.querySelector("#loginStatus");
+  ui.loginSubmitBtn = ui.loginForm?.querySelector('button[type="submit"]');
   ui.logoutBtn = document.querySelector("#logoutBtn");
   ui.heroStats = document.querySelector("#heroStats");
   ui.parcelForm = document.querySelector("#parcelForm");
@@ -149,20 +155,30 @@ function bindEvents() {
 }
 
 function syncAccessGate() {
+  refreshAccessRateLimit();
   setAppAccess(hasStoredAccess());
 }
 
 function handleLoginSubmit(event) {
   event.preventDefault();
 
-  const typedPassword = ui.loginPasswordInput.value.trim();
-  if (typedPassword !== ACCESS_PASSWORD) {
-    ui.loginStatus.textContent = "Code incorrect.";
-    ui.loginPasswordInput.focus();
-    ui.loginPasswordInput.select();
+  refreshAccessRateLimit();
+  if (isAccessTemporarilyLocked()) {
+    syncAccessRateLimitUi();
     return;
   }
 
+  const typedPassword = ui.loginPasswordInput.value.trim();
+  if (typedPassword !== ACCESS_PASSWORD) {
+    registerFailedLoginAttempt();
+    if (!isAccessTemporarilyLocked()) {
+      ui.loginPasswordInput.focus();
+      ui.loginPasswordInput.select();
+    }
+    return;
+  }
+
+  resetAccessRateLimit();
   window.localStorage.setItem(ACCESS_STORAGE_KEY, "granted");
   ui.loginStatus.textContent = "";
   ui.loginForm.reset();
@@ -187,12 +203,137 @@ function setAppAccess(isGranted) {
 
   if (!isGranted) {
     ui.loginForm.reset();
-    ui.loginStatus.textContent = "";
-    ui.loginPasswordInput.focus();
+    syncAccessRateLimitUi();
+    if (!isAccessTemporarilyLocked()) {
+      ui.loginPasswordInput.focus();
+    }
     return;
   }
 
+  stopAccessLockCountdown();
   ui.routeCodeInput.focus();
+}
+
+function loadAccessRateLimit() {
+  try {
+    const raw = window.localStorage.getItem(ACCESS_RATE_LIMIT_STORAGE_KEY);
+    if (!raw) {
+      return {
+        failedAttempts: 0,
+        lockedUntil: 0,
+      };
+    }
+
+    const parsed = JSON.parse(raw);
+    return {
+      failedAttempts: Math.max(0, Number(parsed.failedAttempts || 0)),
+      lockedUntil: Math.max(0, Number(parsed.lockedUntil || 0)),
+    };
+  } catch (error) {
+    return {
+      failedAttempts: 0,
+      lockedUntil: 0,
+    };
+  }
+}
+
+function saveAccessRateLimit() {
+  window.localStorage.setItem(ACCESS_RATE_LIMIT_STORAGE_KEY, JSON.stringify(accessRateLimit));
+}
+
+function refreshAccessRateLimit() {
+  if (accessRateLimit.lockedUntil && accessRateLimit.lockedUntil <= Date.now()) {
+    accessRateLimit.lockedUntil = 0;
+    saveAccessRateLimit();
+  }
+}
+
+function resetAccessRateLimit() {
+  accessRateLimit.failedAttempts = 0;
+  accessRateLimit.lockedUntil = 0;
+  saveAccessRateLimit();
+  stopAccessLockCountdown();
+  syncAccessRateLimitUi();
+}
+
+function isAccessTemporarilyLocked() {
+  return accessRateLimit.lockedUntil > Date.now();
+}
+
+function registerFailedLoginAttempt() {
+  accessRateLimit.failedAttempts += 1;
+
+  if (accessRateLimit.failedAttempts % ACCESS_FAILED_ATTEMPTS_LIMIT === 0) {
+    accessRateLimit.lockedUntil = Date.now() + ACCESS_LOCK_DURATION_MS;
+    saveAccessRateLimit();
+    syncAccessRateLimitUi();
+    return;
+  }
+
+  const remainingAttempts = ACCESS_FAILED_ATTEMPTS_LIMIT - (accessRateLimit.failedAttempts % ACCESS_FAILED_ATTEMPTS_LIMIT);
+  accessRateLimit.lockedUntil = 0;
+  saveAccessRateLimit();
+  stopAccessLockCountdown();
+  ui.loginStatus.textContent = `Code incorrect. Encore ${remainingAttempts} essai${remainingAttempts > 1 ? "s" : ""} avant l'attente.`;
+  ui.loginPasswordInput.disabled = false;
+  ui.loginSubmitBtn.disabled = false;
+}
+
+function syncAccessRateLimitUi() {
+  refreshAccessRateLimit();
+
+  const isLocked = isAccessTemporarilyLocked();
+  ui.loginPasswordInput.disabled = isLocked;
+  ui.loginSubmitBtn.disabled = isLocked;
+
+  if (isLocked) {
+    ui.loginStatus.textContent = formatAccessLockMessage();
+    startAccessLockCountdown();
+    return;
+  }
+
+  stopAccessLockCountdown();
+  if (isAccessLockMessage(ui.loginStatus.textContent)) {
+    ui.loginStatus.textContent = "";
+  }
+}
+
+function startAccessLockCountdown() {
+  if (loginLockCountdownId !== null) {
+    return;
+  }
+
+  loginLockCountdownId = window.setInterval(() => {
+    refreshAccessRateLimit();
+
+    if (!isAccessTemporarilyLocked()) {
+      syncAccessRateLimitUi();
+      if (ui.loginGate.getAttribute("aria-hidden") !== "true") {
+        ui.loginPasswordInput.focus();
+      }
+      return;
+    }
+
+    ui.loginStatus.textContent = formatAccessLockMessage();
+  }, 250);
+}
+
+function stopAccessLockCountdown() {
+  if (loginLockCountdownId === null) {
+    return;
+  }
+
+  window.clearInterval(loginLockCountdownId);
+  loginLockCountdownId = null;
+}
+
+function formatAccessLockMessage() {
+  const remainingSeconds = Math.max(1, Math.ceil((accessRateLimit.lockedUntil - Date.now()) / 1000));
+  return `Trop d'essais rates. Reessayez dans ${remainingSeconds} seconde${remainingSeconds > 1 ? "s" : ""}.`;
+}
+
+function isAccessLockMessage(value) {
+  return /^Trop d'essais rates\./.test(value);
 }
 
 function loadState() {
