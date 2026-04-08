@@ -557,6 +557,12 @@ code {
   flex: 1;
 }
 
+.document-card__actions {
+  display: grid;
+  gap: 10px;
+  min-width: 132px;
+}
+
 .document-card__title {
   margin: 0;
   font-family: "Space Grotesk", sans-serif;
@@ -570,6 +576,46 @@ code {
 
 .document-card__action {
   flex-shrink: 0;
+}
+
+.document-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.distribution-chip--alert {
+  background: rgba(241, 179, 157, 0.22);
+  color: #874437;
+}
+
+.document-missing {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(154, 200, 235, 0.08);
+  border: 1px solid rgba(36, 78, 115, 0.08);
+}
+
+.document-missing__title {
+  margin: 0 0 10px;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 0.98rem;
+}
+
+.document-missing__list {
+  display: grid;
+  gap: 8px;
+}
+
+.document-missing__item {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(36, 78, 115, 0.08);
 }
 
 .destination-card h3 {

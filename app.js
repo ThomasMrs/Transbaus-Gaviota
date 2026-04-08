@@ -2,6 +2,9 @@ const STORAGE_KEY = "transbaus-gaviota-state-v1";
 const COLLAPSE_STORAGE_KEY = "le-baus-du-tri-collapse-v1";
 const PDF_DB_NAME = "le-baus-du-tri-documents-v1";
 const PDF_STORE_NAME = "delivery-notes";
+const PDFJS_VERSION = "5.6.205";
+const PDFJS_MODULE_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.mjs`;
+const PDFJS_WORKER_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.mjs`;
 const DEFAULT_COLLAPSE_STATE = {
   flow: true,
   scanner: false,
@@ -36,6 +39,10 @@ const captureSession = {
   mode: "label",
   busy: false,
 };
+const deliveryNoteAnalysis = {
+  busy: false,
+};
+let pdfjsLibPromise = null;
 
 document.addEventListener("DOMContentLoaded", () => {
   cacheElements();
@@ -528,14 +535,63 @@ function renderDeliveryNotes() {
   ui.deliveryNoteList.innerHTML = state.deliveryNotes
     .slice()
     .sort((left, right) => new Date(right.importedAt) - new Date(left.importedAt))
-    .map((note) => `
-      <article class="document-card">
-        <div class="document-card__body">
-          <p class="document-card__title">${escapeHtml(note.name)}</p>
-          <p class="document-card__meta">
-            PDF ${escapeHtml(formatFileSize(note.size))} | importe le ${escapeHtml(formatDate(note.importedAt))}
-          </p>
-        </div>
+    .map((note) => deliveryNoteTemplate(note))
+    .join("");
+}
+
+function deliveryNoteTemplate(note) {
+  const analysis = note.analysis || null;
+  const summary = analysis
+    ? `
+      <div class="document-summary">
+        <span class="distribution-chip">Livraisons : ${escapeHtml(String(analysis.totalEntries))}</span>
+        <span class="distribution-chip">Enregistrees : ${escapeHtml(String(analysis.matchedCount))}</span>
+        <span class="distribution-chip distribution-chip--alert">Manquantes : ${escapeHtml(String(analysis.missingCount))}</span>
+      </div>
+      ${analysis.parseError
+        ? `<p class="field-help">${escapeHtml(analysis.parseError)}</p>`
+        : analysis.missingEntries.length
+        ? `
+          <div class="document-missing">
+            <p class="document-missing__title">Colis manquants</p>
+            <div class="document-missing__list">
+              ${analysis.missingEntries.map((entry) => `
+                <article class="document-missing__item">
+                  <strong>${escapeHtml(entry.commandNumber)}</strong>
+                  ${entry.client ? `<span>${escapeHtml(entry.client)}</span>` : ""}
+                  ${entry.city ? `<span>${escapeHtml(entry.city)}</span>` : ""}
+                </article>
+              `).join("")}
+            </div>
+          </div>
+        `
+        : `
+          <p class="field-help">Toutes les livraisons du PDF semblent deja enregistrees.</p>
+        `}
+    `
+    : `
+      <p class="field-help">Aucune analyse de comparaison disponible pour ce PDF.</p>
+    `;
+
+  return `
+    <article class="document-card">
+      <div class="document-card__body">
+        <p class="document-card__title">${escapeHtml(note.name)}</p>
+        <p class="document-card__meta">
+          PDF ${escapeHtml(formatFileSize(note.size))} | importe le ${escapeHtml(formatDate(note.importedAt))}
+          ${analysis?.analyzedAt ? ` | analyse le ${escapeHtml(formatDate(analysis.analyzedAt))}` : ""}
+        </p>
+        ${summary}
+      </div>
+      <div class="document-card__actions">
+        <button
+          class="btn btn--secondary document-card__action"
+          type="button"
+          data-action="analyze-delivery-note"
+          data-note-id="${escapeHtml(note.id)}"
+        >
+          ${analysis ? "Reanalyser" : "Analyser"}
+        </button>
         <button
           class="btn btn--danger document-card__action"
           type="button"
@@ -544,9 +600,9 @@ function renderDeliveryNotes() {
         >
           Supprimer
         </button>
-      </article>
-    `)
-    .join("");
+      </div>
+    </article>
+  `;
 }
 
 function handleParcelSubmit(event) {
@@ -706,10 +762,11 @@ async function handleDeliveryNoteImport(event) {
     name: normalizeFreeText(file.name || "Bon-de-livraison.pdf"),
     size: Number(file.size || 0),
     importedAt: new Date().toISOString(),
+    analysis: null,
   };
 
   try {
-    setDeliveryNoteBusy(true);
+    setDeliveryNoteBusy(true, "Import en cours...");
     ui.deliveryNoteStatus.textContent = "Import du PDF en cours...";
 
     await saveDeliveryNoteFile(deliveryNote.id, file);
@@ -717,8 +774,15 @@ async function handleDeliveryNoteImport(event) {
     saveState();
     renderDeliveryNotes();
 
-    ui.deliveryNoteStatus.textContent = `PDF importe : ${deliveryNote.name}`;
-    showToast(`PDF ${deliveryNote.name} importe.`);
+    ui.deliveryNoteStatus.textContent = `PDF importe : ${deliveryNote.name}. Analyse en cours...`;
+
+    try {
+      await analyzeDeliveryNote(deliveryNote.id, file);
+      showToast(`PDF ${deliveryNote.name} importe et compare.`);
+    } catch (error) {
+      ui.deliveryNoteStatus.textContent = `PDF importe : ${deliveryNote.name}. Analyse impossible pour le moment.`;
+      showToast(`PDF ${deliveryNote.name} importe, mais l'analyse a echoue.`, "danger");
+    }
   } catch (error) {
     ui.deliveryNoteStatus.textContent = "Impossible d'importer ce PDF.";
     showToast("Impossible d'importer ce PDF.", "danger");
@@ -729,8 +793,27 @@ async function handleDeliveryNoteImport(event) {
 }
 
 async function handleDeliveryNoteListClick(event) {
-  const button = event.target.closest("[data-action='delete-delivery-note']");
+  const button = event.target.closest("[data-action]");
   if (!(button instanceof HTMLElement)) {
+    return;
+  }
+
+  if (button.dataset.action === "analyze-delivery-note") {
+    const noteId = button.dataset.noteId;
+    if (!noteId) {
+      return;
+    }
+
+    try {
+      await analyzeDeliveryNote(noteId);
+    } catch (error) {
+      ui.deliveryNoteStatus.textContent = "Impossible d'analyser ce PDF.";
+      showToast("Impossible d'analyser ce PDF.", "danger");
+    }
+    return;
+  }
+
+  if (button.dataset.action !== "delete-delivery-note") {
     return;
   }
 
@@ -756,6 +839,50 @@ async function handleDeliveryNoteListClick(event) {
   renderDeliveryNotes();
   ui.deliveryNoteStatus.textContent = "";
   showToast(`PDF ${deliveryNote.name} supprime.`);
+}
+
+async function analyzeDeliveryNote(noteId, providedFile = null) {
+  const deliveryNote = state.deliveryNotes.find((note) => note.id === noteId);
+  if (!deliveryNote || deliveryNoteAnalysis.busy) {
+    return;
+  }
+
+  let file = providedFile;
+  if (!file) {
+    file = await getDeliveryNoteFile(noteId);
+  }
+
+  if (!file) {
+    throw new Error("missing-pdf-file");
+  }
+
+  try {
+    setDeliveryNoteBusy(true, "Analyse en cours...");
+    deliveryNoteAnalysis.busy = true;
+    ui.deliveryNoteStatus.textContent = "Preparation de l'analyse du bon de livraison...";
+
+    const extractedText = await extractTextFromPdfFile(file, (message) => {
+      ui.deliveryNoteStatus.textContent = message;
+    });
+    const entries = parseDeliveryNoteText(extractedText);
+    const analysis = compareDeliveryNoteEntries(entries);
+
+    deliveryNote.analysis = {
+      ...analysis,
+      analyzedAt: new Date().toISOString(),
+    };
+
+    saveState();
+    renderDeliveryNotes();
+    ui.deliveryNoteStatus.textContent = analysis.missingCount
+      ? `${analysis.missingCount} colis manquants identifies dans ${deliveryNote.name}.`
+      : analysis.parseError
+      ? `Analyse terminee, mais aucune livraison exploitable n'a ete detectee dans ${deliveryNote.name}.`
+      : `Aucun colis manquant detecte dans ${deliveryNote.name}.`;
+  } finally {
+    deliveryNoteAnalysis.busy = false;
+    setDeliveryNoteBusy(false);
+  }
 }
 
 function openLabelCameraPicker() {
@@ -1099,9 +1226,89 @@ function fallbackToNativeCapture(mode) {
   }
 }
 
-function setDeliveryNoteBusy(isBusy) {
+function setDeliveryNoteBusy(isBusy, busyLabel = "Import en cours...") {
   ui.importDeliveryNoteBtn.disabled = isBusy;
-  ui.importDeliveryNoteBtn.textContent = isBusy ? "Import en cours..." : "Importer un PDF";
+  ui.importDeliveryNoteBtn.textContent = isBusy ? busyLabel : "Importer un PDF";
+}
+
+async function extractTextFromPdfFile(file, onProgress) {
+  if (typeof window.Tesseract?.createWorker !== "function") {
+    throw new Error("tesseract-unavailable");
+  }
+
+  const pdfjsLib = await getPdfJs();
+  const data = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({ data });
+  const pdfDocument = await loadingTask.promise;
+  const textChunks = [];
+
+  try {
+    for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
+      onProgress?.(`Analyse du PDF page ${pageNumber}/${pdfDocument.numPages}...`);
+
+      const page = await pdfDocument.getPage(pageNumber);
+      const pageImage = await renderPdfPageToCanvas(page);
+      const worker = await getOcrWorker();
+      const result = await worker.recognize(pageImage);
+
+      textChunks.push(result.data.text || "");
+      page.cleanup();
+    }
+  } finally {
+    await loadingTask.destroy();
+  }
+
+  return textChunks.join("\n");
+}
+
+function parseDeliveryNoteText(text) {
+  const lines = String(text)
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => normalizePdfOcrLine(line))
+    .filter(Boolean);
+  const entries = [];
+
+  lines.forEach((line, index) => {
+    const rawCommandNumber = extractDeliveryCommandNumber(line);
+    if (!rawCommandNumber) {
+      return;
+    }
+
+    const contextLines = lines.slice(Math.max(0, index - 6), Math.min(lines.length, index + 6));
+    const commandNumber = resolveDeliveryCommandNumber(rawCommandNumber, contextLines);
+    entries.push({
+      commandNumber,
+      client: extractDeliveryClient(contextLines),
+      city: extractDeliveryCity(contextLines),
+      rawContext: contextLines.join(" | "),
+    });
+  });
+
+  return dedupeDeliveryEntries(entries);
+}
+
+function compareDeliveryNoteEntries(entries) {
+  if (!entries.length) {
+    return {
+      totalEntries: 0,
+      matchedCount: 0,
+      missingCount: 0,
+      missingEntries: [],
+      parseError: "Aucune livraison exploitable n'a ete detectee dans ce PDF. Le scan est peut-etre trop flou.",
+    };
+  }
+
+  const registeredCommands = buildRegisteredCommandSet();
+  const missingEntries = entries.filter((entry) => !registeredCommands.has(entry.commandNumber));
+
+  return {
+    totalEntries: entries.length,
+    matchedCount: entries.length - missingEntries.length,
+    missingCount: missingEntries.length,
+    missingEntries,
+    parseError: "",
+  };
 }
 
 function setOcrBusy(isBusy) {
@@ -1904,6 +2111,29 @@ function normalizeDeliveryNote(note) {
     name: normalizeFreeText(String(note.name)),
     size: Number(note.size || 0),
     importedAt: note.importedAt,
+    analysis: normalizeDeliveryNoteAnalysis(note.analysis),
+  };
+}
+
+function normalizeDeliveryNoteAnalysis(analysis) {
+  if (!analysis || !Array.isArray(analysis.missingEntries)) {
+    return null;
+  }
+
+  return {
+    totalEntries: Number(analysis.totalEntries || 0),
+    matchedCount: Number(analysis.matchedCount || 0),
+    missingCount: Number(analysis.missingCount || 0),
+    parseError: normalizeFreeText(analysis.parseError || ""),
+    missingEntries: analysis.missingEntries
+      .map((entry) => ({
+        commandNumber: normalizeBarcode(entry.commandNumber || ""),
+        client: normalizeFreeText(entry.client || ""),
+        city: normalizeFreeText(entry.city || ""),
+        rawContext: normalizeFreeText(entry.rawContext || ""),
+      }))
+      .filter((entry) => entry.commandNumber),
+    analyzedAt: analysis.analyzedAt || "",
   };
 }
 
@@ -1936,6 +2166,58 @@ function formatRouteCodeForDisplay(routeCode) {
   return `${routePrefix} ${postalCode.slice(0, 2)} ${postalCode.slice(2)}`;
 }
 
+async function getPdfJs() {
+  if (!pdfjsLibPromise) {
+    pdfjsLibPromise = import(PDFJS_MODULE_URL)
+      .then((module) => {
+        module.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+        return module;
+      })
+      .catch((error) => {
+        pdfjsLibPromise = null;
+        throw error;
+      });
+  }
+
+  return pdfjsLibPromise;
+}
+
+async function renderPdfPageToCanvas(page) {
+  const viewport = page.getViewport({ scale: 3 });
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d", { alpha: false });
+
+  if (!context) {
+    throw new Error("canvas-unavailable");
+  }
+
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+
+  await page.render({
+    canvasContext: context,
+    viewport,
+  }).promise;
+
+  return await canvasToBlob(canvas);
+}
+
+function canvasToBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error("canvas-blob-failed"));
+        }
+      },
+      "image/png",
+      1,
+    );
+  });
+}
+
 function openPdfDatabase() {
   return new Promise((resolve, reject) => {
     if (!window.indexedDB) {
@@ -1955,6 +2237,21 @@ function openPdfDatabase() {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || new Error("indexeddb-open-failed"));
   });
+}
+
+async function getDeliveryNoteFile(noteId) {
+  const db = await openPdfDatabase();
+
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(PDF_STORE_NAME, "readonly");
+      const request = transaction.objectStore(PDF_STORE_NAME).get(noteId);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error || new Error("indexeddb-read-failed"));
+    });
+  } finally {
+    db.close();
+  }
 }
 
 async function saveDeliveryNoteFile(noteId, file) {
@@ -1987,6 +2284,173 @@ async function deleteDeliveryNoteFile(noteId) {
   } finally {
     db.close();
   }
+}
+
+function normalizePdfOcrLine(value) {
+  return normalizeFreeText(
+    String(value)
+      .replace(/[|]/g, "I")
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .replace(/[_]+/g, " ")
+      .replace(/[^\S\r\n]+/g, " "),
+  );
+}
+
+function extractDeliveryCommandNumber(line) {
+  const match = line.match(/COMMANDE[\sA-Z°ºN:R.W-]*?(\d{5,8})\b/i);
+  return match ? normalizeBarcode(match[1]) : "";
+}
+
+function resolveDeliveryCommandNumber(initialValue, contextLines) {
+  const frequencies = new Map();
+  const candidates = contextLines.flatMap((line, index) => {
+    const matches = [...line.matchAll(/\b\d{5,8}\b/g)].map((match) => ({
+      value: normalizeBarcode(match[0]),
+      line,
+      index,
+    }));
+
+    matches.forEach((candidate) => {
+      frequencies.set(candidate.value, (frequencies.get(candidate.value) || 0) + 1);
+    });
+
+    return matches;
+  });
+
+  const bestCandidate = candidates
+    .filter((candidate) => !looksLikeDeliveryDate(candidate.value))
+    .sort((left, right) => getDeliveryCommandCandidateScore(right, initialValue, frequencies) - getDeliveryCommandCandidateScore(left, initialValue, frequencies))[0];
+
+  return bestCandidate?.value || initialValue;
+}
+
+function getDeliveryCommandCandidateScore(candidate, initialValue, frequencies) {
+  let score = 0;
+  const line = candidate.line || "";
+
+  if (candidate.value === initialValue) {
+    score += 20;
+  }
+
+  if (/COMMANDE/i.test(line)) {
+    score += 40;
+  }
+
+  if (/\bCDE\b|CODE/i.test(line)) {
+    score += 30;
+  }
+
+  if (candidate.value.length >= 6 && candidate.value.length <= 7) {
+    score += 10;
+  }
+
+  if (candidate.value.startsWith("0")) {
+    score += 4;
+  }
+
+  score += (frequencies.get(candidate.value) || 0) * 8;
+  score -= candidate.index * 2;
+
+  return score;
+}
+
+function extractDeliveryClient(lines) {
+  for (const line of lines) {
+    const normalized = line.replace(/[©@]/g, " ").trim();
+    const match = normalized.match(/^\d{5,6}\s+(.+)$/);
+    if (!match) {
+      continue;
+    }
+
+    const clientName = sliceUppercaseClientTokens(match[1]);
+    if (clientName) {
+      return clientName;
+    }
+  }
+
+  return "";
+}
+
+function sliceUppercaseClientTokens(value) {
+  const tokens = normalizeFreeText(value).split(" ");
+  const clientTokens = [];
+
+  for (const token of tokens) {
+    if (/^\d{5}$/.test(token)) {
+      break;
+    }
+
+    if (/^\d+$/.test(token) || token.includes("/")) {
+      break;
+    }
+
+    if (/[a-zà-ÿ]/u.test(token)) {
+      break;
+    }
+
+    clientTokens.push(token);
+  }
+
+  const clientName = normalizeFreeText(clientTokens.join(" "));
+  return /[A-Z]/.test(clientName) ? clientName : "";
+}
+
+function extractDeliveryCity(lines) {
+  for (const line of lines) {
+    const cleaned = normalizeFreeText(line.replace(/[©@]/g, " "));
+    const postalMatch = cleaned.match(/\b\d{5}\b/);
+    if (!postalMatch) {
+      continue;
+    }
+
+    const afterPostalCode = cleaned.slice(postalMatch.index + postalMatch[0].length).trim().split(" ");
+    const cityTokens = [];
+
+    for (const token of afterPostalCode) {
+      if (/^\d+$/.test(token) || /[a-zà-ÿ]/u.test(token)) {
+        break;
+      }
+
+      if (!/[A-Z]/.test(token)) {
+        break;
+      }
+
+      cityTokens.push(token);
+    }
+
+    const city = normalizeFreeText(cityTokens.join(" "));
+    if (city) {
+      return city;
+    }
+  }
+
+  return "";
+}
+
+function dedupeDeliveryEntries(entries) {
+  const seen = new Set();
+
+  return entries.filter((entry) => {
+    if (!entry.commandNumber || seen.has(entry.commandNumber)) {
+      return false;
+    }
+
+    seen.add(entry.commandNumber);
+    return true;
+  });
+}
+
+function buildRegisteredCommandSet() {
+  return new Set(
+    state.parcels
+      .map((parcel) => normalizeBarcode(parcel.barcode || ""))
+      .filter((barcode) => /^\d{5,10}$/.test(barcode)),
+  );
+}
+
+function looksLikeDeliveryDate(value) {
+  return /^(?:19|20)\d{6}$/.test(value) || /^(?:0[1-9]|[12]\d|3[01])(?:0[1-9]|1[0-2])\d{2}$/.test(value);
 }
 
 function clamp(value, min, max) {
