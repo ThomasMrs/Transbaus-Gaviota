@@ -7,7 +7,8 @@ Application web locale pour trier des colis par baques, scanner des codes-barres
 - ajout de baques depuis l'interface
 - scan de code-barres avec la camera du navigateur
 - saisie manuelle du code-barres
-- suivi d'un colis par destination
+- suivi d'un colis par destination complete
+- prise en compte optionnelle du numero destination de type `R447500`
 - deplacement d'un colis d'une baque a une autre
 - suppression de colis et de baques
 - sauvegarde locale automatique dans le navigateur

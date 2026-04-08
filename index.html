@@ -62,12 +62,22 @@
             </label>
 
             <label class="field">
-              <span>Destination</span>
+              <span>Numero destination</span>
+              <input
+                id="routeCodeInput"
+                type="text"
+                maxlength="16"
+                placeholder="Exemple : R447500"
+              >
+            </label>
+
+            <label class="field">
+              <span>Destination complete</span>
               <input
                 id="destinationInput"
                 type="text"
-                maxlength="12"
-                placeholder="Exemple : 66"
+                maxlength="120"
+                placeholder="Exemple : 47500 Saint-Vite"
                 required
               >
             </label>
@@ -93,7 +103,7 @@
             </div>
 
             <p class="field-help">
-              Si le code-barres existe deja, le colis est mis a jour au lieu d'etre duplique.
+              Renseignez la destination complete du colis. Le numero destination est optionnel, mais utile pour la recherche.
             </p>
           </form>
         </article>
@@ -140,11 +150,11 @@
           </div>
 
           <label class="field">
-            <span>Code-barres ou destination</span>
+            <span>Code-barres, numero destination ou destination complete</span>
             <input
               id="searchInput"
               type="search"
-              placeholder="Exemple : 66 ou 123456789"
+              placeholder="Exemple : 063619, R447500 ou 47500 Saint-Vite"
             >
           </label>
 

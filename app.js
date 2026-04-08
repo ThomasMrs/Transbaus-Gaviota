@@ -26,6 +26,7 @@ function cacheElements() {
   ui.heroStats = document.querySelector("#heroStats");
   ui.parcelForm = document.querySelector("#parcelForm");
   ui.parcelBaqueSelect = document.querySelector("#parcelBaqueSelect");
+  ui.routeCodeInput = document.querySelector("#routeCodeInput");
   ui.destinationInput = document.querySelector("#destinationInput");
   ui.barcodeInput = document.querySelector("#barcodeInput");
   ui.openScannerBtn = document.querySelector("#openScannerBtn");
@@ -82,7 +83,8 @@ function loadState() {
       .map((parcel) => ({
         id: parcel.id || createId(),
         barcode: String(parcel.barcode || "").trim(),
-        destination: String(parcel.destination || "").trim().toUpperCase(),
+        routeCode: String(parcel.routeCode || "").trim().toUpperCase(),
+        destination: String(parcel.destination || "").trim(),
         currentBaqueId: parcel.currentBaqueId,
         originBaqueId: parcel.originBaqueId || parcel.currentBaqueId,
         originBaqueLabel: String(parcel.originBaqueLabel || ""),
@@ -275,6 +277,7 @@ function parcelTemplate(parcel) {
           <p class="parcel-code">${escapeHtml(parcel.barcode)}</p>
           <p class="parcel-meta">
             Destination <strong>${escapeHtml(parcel.destination)}</strong><br>
+            ${parcel.routeCode ? `Numero destination : ${escapeHtml(parcel.routeCode)}<br>` : ""}
             Origine : ${escapeHtml(getOriginLabel(parcel))}<br>
             Derniere mise a jour : ${escapeHtml(formatDate(parcel.updatedAt || parcel.createdAt))}
           </p>
@@ -324,6 +327,7 @@ function renderSearchResults() {
     const baque = getBaqueById(parcel.currentBaqueId);
     const haystack = [
       parcel.barcode,
+      parcel.routeCode || "",
       parcel.destination,
       baque?.name || "",
       baque?.location || "",
@@ -353,6 +357,7 @@ function renderSearchResults() {
         <article class="search-card">
           <h3>${escapeHtml(parcel.barcode)}</h3>
           <div class="search-card__meta">
+            ${parcel.routeCode ? `<span><strong>Numero destination :</strong> ${escapeHtml(parcel.routeCode)}</span>` : ""}
             <span><strong>Destination :</strong> ${escapeHtml(parcel.destination)}</span>
             <span><strong>Baque actuelle :</strong> ${escapeHtml(baque?.name || "Baque supprimee")}</span>
             <span><strong>Emplacement :</strong> ${escapeHtml(baque?.location || "Inconnu")}</span>
@@ -449,6 +454,7 @@ function handleModalClick(event) {
 
 function upsertParcel(scannedBarcode = "") {
   const baqueId = ui.parcelBaqueSelect.value;
+  const routeCode = normalizeRouteCode(ui.routeCodeInput.value);
   const destination = normalizeDestination(ui.destinationInput.value);
   const barcode = normalizeBarcode(scannedBarcode || ui.barcodeInput.value);
 
@@ -468,6 +474,7 @@ function upsertParcel(scannedBarcode = "") {
 
   if (existing) {
     const moved = existing.currentBaqueId !== baqueId;
+    existing.routeCode = routeCode;
     existing.destination = destination;
     existing.currentBaqueId = baqueId;
     existing.updatedAt = now;
@@ -486,6 +493,7 @@ function upsertParcel(scannedBarcode = "") {
   state.parcels.unshift({
     id: createId(),
     barcode,
+    routeCode,
     destination,
     currentBaqueId: baqueId,
     originBaqueId: baqueId,
@@ -502,6 +510,7 @@ function upsertParcel(scannedBarcode = "") {
 }
 
 function clearParcelForm() {
+  ui.routeCodeInput.value = "";
   ui.destinationInput.value = "";
   ui.barcodeInput.value = "";
   ui.destinationInput.focus();
@@ -725,6 +734,10 @@ function createId() {
 }
 
 function normalizeDestination(value) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function normalizeRouteCode(value) {
   return value.trim().toUpperCase();
 }
 
