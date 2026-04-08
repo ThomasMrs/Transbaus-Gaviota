@@ -113,7 +113,7 @@ function loadState() {
         createdAt: parcel.createdAt || new Date().toISOString(),
         updatedAt: parcel.updatedAt || parcel.createdAt || new Date().toISOString(),
       }))
-      .filter((parcel) => parcel.barcode && parcel.destination);
+      .filter((parcel) => parcel.routeCode || parcel.barcode || parcel.destination);
 
     return {
       baques: baques.length ? baques : createDefaultState().baques,
@@ -151,7 +151,11 @@ function render() {
 function renderHeroStats() {
   const totalBaques = state.baques.length;
   const totalParcels = state.parcels.length;
-  const totalDestinations = new Set(state.parcels.map((parcel) => parcel.destination)).size;
+  const totalDestinations = new Set(
+    state.parcels
+      .map((parcel) => getParcelDestinationKey(parcel))
+      .filter(Boolean),
+  ).size;
 
   ui.heroStats.innerHTML = [
     statCard(totalBaques, "Baques actives"),
@@ -198,10 +202,14 @@ function renderDestinationSummary() {
   }
 
   const grouped = state.parcels.reduce((map, parcel) => {
-    if (!map.has(parcel.destination)) {
-      map.set(parcel.destination, []);
+    const key = getParcelDestinationKey(parcel);
+    if (!key) {
+      return map;
     }
-    map.get(parcel.destination).push(parcel);
+    if (!map.has(key)) {
+      map.set(key, []);
+    }
+    map.get(key).push(parcel);
     return map;
   }, new Map());
 
@@ -292,8 +300,9 @@ function parcelTemplate(parcel) {
       `,
     )
     .join("");
+  const displayDestination = getParcelDestinationDisplay(parcel);
   const detailLines = [
-    `Destination <strong>${escapeHtml(parcel.destination)}</strong>`,
+    `Destination <strong>${escapeHtml(displayDestination)}</strong>`,
     parcel.client ? `Client : ${escapeHtml(parcel.client)}` : "",
     parcel.routeCode ? `Numero destination : ${escapeHtml(parcel.routeCode)}` : "",
     parcel.routeLabel ? `Route : ${escapeHtml(parcel.routeLabel)}` : "",
@@ -306,13 +315,14 @@ function parcelTemplate(parcel) {
   ]
     .filter(Boolean)
     .join("<br>");
-  const tagLabel = parcel.routeCode || getDestinationShortLabel(parcel.destination) || "Colis";
+  const tagLabel = parcel.routeCode || getDestinationShortLabel(displayDestination) || "Colis";
+  const parcelHeading = getParcelIdentifier(parcel);
 
   return `
     <article class="parcel-item" data-parcel-id="${escapeHtml(parcel.id)}">
       <div class="parcel-item__top">
         <div>
-          <p class="parcel-code">${escapeHtml(parcel.barcode)}</p>
+          <p class="parcel-code">${escapeHtml(parcelHeading)}</p>
           <p class="parcel-meta">${detailLines}</p>
         </div>
         <span class="tag">${escapeHtml(tagLabel)}</span>
@@ -361,7 +371,7 @@ function renderSearchResults() {
     const haystack = [
       parcel.barcode,
       parcel.routeCode || "",
-      parcel.destination,
+      getParcelDestinationDisplay(parcel),
       parcel.client || "",
       parcel.description || "",
       parcel.routeLabel || "",
@@ -392,13 +402,14 @@ function renderSearchResults() {
     .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
     .map((parcel) => {
       const baque = getBaqueById(parcel.currentBaqueId);
+      const displayDestination = getParcelDestinationDisplay(parcel);
 
       return `
         <article class="search-card">
-          <h3>${escapeHtml(parcel.barcode)}</h3>
+          <h3>${escapeHtml(getParcelIdentifier(parcel))}</h3>
           <div class="search-card__meta">
             ${parcel.routeCode ? `<span><strong>Numero destination :</strong> ${escapeHtml(parcel.routeCode)}</span>` : ""}
-            <span><strong>Destination :</strong> ${escapeHtml(parcel.destination)}</span>
+            <span><strong>Destination :</strong> ${escapeHtml(displayDestination)}</span>
             ${parcel.client ? `<span><strong>Client :</strong> ${escapeHtml(parcel.client)}</span>` : ""}
             ${parcel.description ? `<span><strong>Description :</strong> ${escapeHtml(parcel.description)}</span>` : ""}
             ${parcel.routeLabel ? `<span><strong>Route :</strong> ${escapeHtml(parcel.routeLabel)}</span>` : ""}
@@ -529,9 +540,9 @@ async function handleLabelImageChange(event) {
 
     applyParsedLabelData(parsed);
 
-    if (!parsed.barcode && !parsed.destination && !parsed.routeCode) {
+    if (!parsed.routeCode) {
       ui.ocrStatus.textContent = "Lecture terminee, mais peu d'informations ont ete reconnues. Reprenez une photo plus nette.";
-      showToast("OCR termine avec peu de donnees. Essayez une photo plus nette.", "danger");
+      showToast("Numero destination introuvable. Essayez une photo plus nette.", "danger");
       return;
     }
 
@@ -818,8 +829,8 @@ function upsertParcel(scannedBarcode = "") {
     packageIndex,
   });
 
-  if (!baqueId || !normalizedParcelData.destination || !normalizedParcelData.barcode) {
-    showToast("Choisissez une baque, une destination et un code-barres.", "danger");
+  if (!baqueId || !normalizedParcelData.routeCode) {
+    showToast("Choisissez une baque et renseignez le numero destination.", "danger");
     return false;
   }
 
@@ -830,7 +841,9 @@ function upsertParcel(scannedBarcode = "") {
   }
 
   const now = new Date().toISOString();
-  const existing = state.parcels.find((parcel) => parcel.barcode === normalizedParcelData.barcode);
+  const existing = normalizedParcelData.barcode
+    ? state.parcels.find((parcel) => parcel.barcode === normalizedParcelData.barcode)
+    : null;
 
   if (existing) {
     const moved = existing.currentBaqueId !== baqueId;
@@ -851,8 +864,8 @@ function upsertParcel(scannedBarcode = "") {
     clearParcelForm();
     showToast(
       moved
-        ? `Colis ${normalizedParcelData.barcode} deplace vers ${baque.name}.`
-        : `Colis ${normalizedParcelData.barcode} mis a jour.`,
+        ? `Colis ${getParcelIdentifier(normalizedParcelData)} deplace vers ${baque.name}.`
+        : `Colis ${getParcelIdentifier(normalizedParcelData)} mis a jour.`,
     );
     return true;
   }
@@ -879,7 +892,7 @@ function upsertParcel(scannedBarcode = "") {
   saveState();
   render();
   clearParcelForm();
-  showToast(`Colis ${normalizedParcelData.barcode} ajoute dans ${baque.name}.`);
+  showToast(`Colis ${getParcelIdentifier(normalizedParcelData)} ajoute dans ${baque.name}.`);
   return true;
 }
 
@@ -895,7 +908,7 @@ function clearParcelForm() {
   ui.packageIndexInput.value = "";
   ui.barcodeInput.value = "";
   ui.ocrStatus.textContent = "";
-  ui.destinationInput.focus();
+  ui.routeCodeInput.focus();
 }
 
 function deleteBaque(baqueId) {
@@ -927,14 +940,14 @@ function deleteParcel(parcelId) {
     return;
   }
 
-  if (!window.confirm(`Supprimer le colis ${parcel.barcode} ?`)) {
+  if (!window.confirm(`Supprimer le colis ${getParcelIdentifier(parcel)} ?`)) {
     return;
   }
 
   state.parcels = state.parcels.filter((item) => item.id !== parcelId);
   saveState();
   render();
-  showToast(`Colis ${parcel.barcode} supprime.`);
+  showToast(`Colis ${getParcelIdentifier(parcel)} supprime.`);
 }
 
 function moveParcel(parcelId) {
@@ -968,7 +981,7 @@ function moveParcel(parcelId) {
   parcel.updatedAt = new Date().toISOString();
   saveState();
   render();
-  showToast(`Colis ${parcel.barcode} deplace vers ${nextBaque.name}.`);
+  showToast(`Colis ${getParcelIdentifier(parcel)} deplace vers ${nextBaque.name}.`);
 }
 
 async function openScanner() {
@@ -1074,7 +1087,7 @@ function getParcelsForBaque(baqueId) {
   return state.parcels
     .filter((parcel) => parcel.currentBaqueId === baqueId)
     .sort((a, b) => {
-      const destinationCompare = a.destination.localeCompare(b.destination, "fr", { numeric: true });
+      const destinationCompare = getParcelDestinationKey(a).localeCompare(getParcelDestinationKey(b), "fr", { numeric: true });
       if (destinationCompare !== 0) {
         return destinationCompare;
       }
@@ -1131,6 +1144,18 @@ function normalizeParcelData(parcel) {
     weight: normalizeFreeText(parcel.weight || ""),
     packageIndex,
   };
+}
+
+function getParcelDestinationDisplay(parcel) {
+  return parcel.destination || parcel.routeCode || "Sans destination";
+}
+
+function getParcelDestinationKey(parcel) {
+  return getParcelDestinationDisplay(parcel).toUpperCase();
+}
+
+function getParcelIdentifier(parcel) {
+  return parcel.barcode || parcel.routeCode || "Sans code-barres";
 }
 
 function sanitizeDestination(value) {

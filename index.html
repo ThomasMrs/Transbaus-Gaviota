@@ -23,7 +23,6 @@
   <div class="page-shell">
     <section class="brand-bar" aria-label="Marques">
       <div class="brand-mark brand-mark--transbaus">
-        <span class="brand-mark__label">TransBaus</span>
         <img
           class="brand-logo brand-logo--transbaus"
           src="assets/transbaus-removebg-preview.png"
@@ -32,7 +31,6 @@
       </div>
 
       <div class="brand-mark brand-mark--gaviota">
-        <span class="brand-mark__label">Gaviota</span>
         <img
           class="brand-logo brand-logo--gaviota"
           src="assets/gaviota-logo.svg"
@@ -57,7 +55,7 @@
         <ol class="flow-list">
           <li>Choisir la baque actuelle du colis.</li>
           <li>Utiliser "Scanner etiquette complete" pour remplir automatiquement les champs.</li>
-          <li>Verifier les informations detectees puis enregistrer le colis.</li>
+          <li>Verifier au minimum le numero destination, puis enregistrer le colis.</li>
           <li>Deplacer, rechercher ou supprimer le colis quand son emplacement change.</li>
         </ol>
         <p class="hero__side-note">
@@ -91,6 +89,7 @@
                 type="text"
                 maxlength="16"
                 placeholder="Exemple : R447500"
+                required
               >
             </label>
 
@@ -100,7 +99,6 @@
                 id="destinationInput"
                 rows="2"
                 placeholder="Exemple : 47500 Saint-Vite"
-                required
               ></textarea>
             </label>
 
@@ -185,7 +183,6 @@
                 type="text"
                 inputmode="numeric"
                 placeholder="Scanne ou saisi manuellement"
-                required
               >
             </label>
 
@@ -205,7 +202,7 @@
             <p id="ocrStatus" class="field-help"></p>
 
             <p class="field-help">
-              Renseignez la destination complete du colis. Le numero destination est optionnel, mais utile pour la recherche.
+              Le numero destination est obligatoire. Tous les autres champs sont optionnels et peuvent etre remplis automatiquement par le scan d'etiquette.
             </p>
           </form>
         </article>
@@ -312,7 +309,7 @@
       </div>
 
       <p class="scanner-help">
-        Le colis sera ajoute automatiquement si la baque et la destination sont deja remplies.
+        Le colis sera ajoute automatiquement si la baque et le numero destination sont deja remplis.
         Si besoin, vous pouvez aussi choisir une image du code-barres.
       </p>
       <p id="scannerStatus" class="scanner-status"></p>

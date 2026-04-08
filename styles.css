@@ -74,9 +74,7 @@ code {
 
 .brand-mark {
   display: flex;
-  flex-direction: column;
   justify-content: center;
-  gap: 10px;
   min-height: 96px;
   padding: 14px 16px;
   border-radius: 18px;
@@ -90,14 +88,6 @@ code {
 
 .brand-mark--gaviota {
   align-items: flex-end;
-}
-
-.brand-mark__label {
-  font-size: 0.74rem;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--text-soft);
 }
 
 .brand-logo {
