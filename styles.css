@@ -38,7 +38,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -56,6 +57,35 @@ code {
   width: min(1280px, calc(100% - 32px));
   margin: 0 auto;
   padding: 28px 0 48px;
+}
+
+.brand-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  margin-bottom: 22px;
+  padding: 18px 22px;
+  border: 1px solid rgba(255, 255, 255, 0.64);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.76);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow);
+}
+
+.brand-logo {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+}
+
+.brand-logo--transbaus {
+  max-height: 68px;
+}
+
+.brand-logo--gaviota {
+  max-height: 82px;
 }
 
 .hero {
@@ -242,6 +272,7 @@ code {
 
 .field input,
 .field select,
+.field textarea,
 .baque-card__title input,
 .baque-card__location input,
 .move-group select {
@@ -256,12 +287,24 @@ code {
 
 .field input:focus,
 .field select:focus,
+.field textarea:focus,
 .baque-card__title input:focus,
 .baque-card__location input:focus,
 .move-group select:focus {
   outline: none;
   border-color: rgba(95, 157, 200, 0.58);
   box-shadow: 0 0 0 4px rgba(154, 200, 235, 0.22);
+}
+
+.field textarea {
+  resize: vertical;
+  min-height: 92px;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 
 .actions {
@@ -284,6 +327,13 @@ code {
   transform: translateY(-1px);
 }
 
+.btn:disabled,
+.icon-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+  transform: none;
+}
+
 .btn--primary {
   color: #fff;
   background: linear-gradient(135deg, var(--primary-deep), var(--primary-strong));
@@ -293,6 +343,11 @@ code {
 .btn--secondary {
   background: rgba(154, 200, 235, 0.18);
   color: var(--primary-deep);
+}
+
+.btn--accent {
+  background: rgba(241, 179, 157, 0.22);
+  color: #874437;
 }
 
 .btn--danger {
@@ -381,6 +436,10 @@ code {
 .tag {
   background: rgba(154, 200, 235, 0.18);
   color: var(--primary-deep);
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
 }
 
 .count-pill {
@@ -576,6 +635,10 @@ code {
   margin-top: 10px;
 }
 
+.hidden-input {
+  display: none;
+}
+
 .toast-zone {
   position: fixed;
   right: 18px;
@@ -604,12 +667,21 @@ code {
   .dashboard-grid {
     grid-template-columns: 1fr;
   }
+
+  .brand-bar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 @media (max-width: 760px) {
   .page-shell {
     width: min(100% - 20px, 1280px);
     padding-top: 14px;
+  }
+
+  .brand-bar {
+    padding: 16px;
   }
 
   .hero__copy,
@@ -620,6 +692,10 @@ code {
   }
 
   .hero__stats {
+    grid-template-columns: 1fr;
+  }
+
+  .field-grid {
     grid-template-columns: 1fr;
   }
 
@@ -636,5 +712,10 @@ code {
   .btn,
   .icon-btn {
     width: 100%;
+  }
+
+  .brand-logo--transbaus,
+  .brand-logo--gaviota {
+    max-height: 54px;
   }
 }

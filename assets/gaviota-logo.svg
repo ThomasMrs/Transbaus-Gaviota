@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 170" role="img" aria-labelledby="title">
+  <title>Gaviota</title>
+  <rect width="640" height="170" rx="28" fill="white" fill-opacity="0"/>
+  <path d="M28 72c0-27 19-48 48-55v28c-14 5-24 18-24 34s10 29 24 34v28c-29-7-48-28-48-55Z" fill="#f04d59"/>
+  <path d="M86 24c33 0 52 17 52 48v52c0 9-7 16-16 16h-9v-18c-7 10-21 16-40 16-32 0-56-24-56-58s24-56 69-56Zm-12 34c-20 0-32 9-32 23 0 15 11 24 30 24 22 0 37-13 37-31V58Z" fill="#111111"/>
+  <text x="154" y="102" fill="#444444" font-family="Arial, Helvetica, sans-serif" font-size="106" font-weight="300" letter-spacing="-5">gaviota</text>
+  <text x="170" y="145" fill="#555555" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="600" letter-spacing="0.5">The Sun &amp; Shutter Specialists</text>
+</svg>

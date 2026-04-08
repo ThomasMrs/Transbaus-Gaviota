@@ -16,17 +16,31 @@
   >
   <link rel="stylesheet" href="styles.css">
   <script src="vendor/html5-qrcode.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
   <div class="page-shell">
+    <section class="brand-bar" aria-label="Marques">
+      <img
+        class="brand-logo brand-logo--transbaus"
+        src="assets/transbaus-logo.svg"
+        alt="TransBaus"
+      >
+      <img
+        class="brand-logo brand-logo--gaviota"
+        src="assets/gaviota-logo.svg"
+        alt="Gaviota"
+      >
+    </section>
+
     <header class="hero">
       <div class="hero__copy">
         <p class="eyebrow">Tri de colis</p>
         <h1>Scannez, rangez et retrouvez chaque colis par baque.</h1>
         <p class="hero__lead">
-          Ajoutez des baques, associez un colis a une destination, puis suivez
-          en un coup d'oeil dans quelle baque il se trouve.
+          Scannez l'etiquette complete ou le code-barres, laissez le site remplir
+          les informations du colis, puis suivez en un coup d'oeil dans quelle baque il se trouve.
         </p>
         <div id="heroStats" class="hero__stats"></div>
       </div>
@@ -35,12 +49,13 @@
         <div class="hero__side-label">Flux conseille</div>
         <ol class="flow-list">
           <li>Choisir la baque actuelle du colis.</li>
-          <li>Renseigner la destination et scanner le code-barres.</li>
-          <li>Deplacer ou supprimer le colis si son emplacement change.</li>
+          <li>Utiliser "Scanner etiquette complete" pour remplir automatiquement les champs.</li>
+          <li>Verifier les informations detectees puis enregistrer le colis.</li>
+          <li>Deplacer, rechercher ou supprimer le colis quand son emplacement change.</li>
         </ol>
         <p class="hero__side-note">
-          Pour la camera en local, lancez le site avec <code>serve-local.ps1</code>
-          puis ouvrez <code>http://localhost:4173</code>.
+          Si l'OCR ne lit pas tout du premier coup, reprenez une photo bien droite,
+          nette et serree sur l'etiquette.
         </p>
       </aside>
     </header>
@@ -74,14 +89,87 @@
 
             <label class="field">
               <span>Destination complete</span>
-              <input
+              <textarea
                 id="destinationInput"
-                type="text"
-                maxlength="120"
+                rows="2"
                 placeholder="Exemple : 47500 Saint-Vite"
                 required
-              >
+              ></textarea>
             </label>
+
+            <div class="field-grid">
+              <label class="field">
+                <span>Client</span>
+                <input
+                  id="clientInput"
+                  type="text"
+                  maxlength="120"
+                  placeholder="Exemple : Menuiserie Vidal"
+                >
+              </label>
+
+              <label class="field">
+                <span>Poids</span>
+                <input
+                  id="weightInput"
+                  type="text"
+                  maxlength="24"
+                  placeholder="Exemple : 49,41 Kg"
+                >
+              </label>
+
+              <label class="field">
+                <span>Date</span>
+                <input
+                  id="shippingDateInput"
+                  type="text"
+                  maxlength="24"
+                  placeholder="Exemple : 25/03/2026"
+                >
+              </label>
+
+              <label class="field">
+                <span>Colis</span>
+                <input
+                  id="packageIndexInput"
+                  type="text"
+                  maxlength="12"
+                  placeholder="Exemple : 1/2"
+                >
+              </label>
+            </div>
+
+            <label class="field">
+              <span>Description</span>
+              <textarea
+                id="descriptionInput"
+                rows="2"
+                maxlength="200"
+                placeholder="Exemple : Systeme coffre..."
+              ></textarea>
+            </label>
+
+            <div class="field-grid">
+              <label class="field">
+                <span>Route detaillee</span>
+                <input
+                  id="routeLabelInput"
+                  type="text"
+                  maxlength="160"
+                  placeholder="Exemple : R4 TRANSBAUS 4 - Zone 47 Lot-et-Garonne"
+                >
+              </label>
+
+              <label class="field">
+                <span>Reference</span>
+                <input
+                  id="referenceInput"
+                  type="text"
+                  maxlength="120"
+                  placeholder="Exemple : BERNERD"
+                >
+              </label>
+            </div>
 
             <label class="field">
               <span>Code-barres</span>
@@ -95,13 +183,19 @@
             </label>
 
             <div class="actions">
+              <button id="scanLabelBtn" class="btn btn--accent" type="button">
+                Scanner etiquette complete
+              </button>
               <button id="openScannerBtn" class="btn btn--secondary" type="button">
-                Ouvrir le scanner
+                Scanner code-barres
               </button>
               <button class="btn btn--primary" type="submit">
                 Enregistrer le colis
               </button>
             </div>
+
+            <input id="labelImageInput" type="file" accept="image/*" capture="environment" class="hidden-input">
+            <p id="ocrStatus" class="field-help"></p>
 
             <p class="field-help">
               Renseignez la destination complete du colis. Le numero destination est optionnel, mais utile pour la recherche.

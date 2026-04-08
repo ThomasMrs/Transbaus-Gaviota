@@ -13,6 +13,10 @@ const scanner = {
   active: false,
   handled: false,
 };
+const ocr = {
+  worker: null,
+  busy: false,
+};
 
 document.addEventListener("DOMContentLoaded", () => {
   cacheElements();
@@ -26,8 +30,18 @@ function cacheElements() {
   ui.parcelBaqueSelect = document.querySelector("#parcelBaqueSelect");
   ui.routeCodeInput = document.querySelector("#routeCodeInput");
   ui.destinationInput = document.querySelector("#destinationInput");
+  ui.clientInput = document.querySelector("#clientInput");
+  ui.descriptionInput = document.querySelector("#descriptionInput");
+  ui.routeLabelInput = document.querySelector("#routeLabelInput");
+  ui.referenceInput = document.querySelector("#referenceInput");
+  ui.shippingDateInput = document.querySelector("#shippingDateInput");
+  ui.weightInput = document.querySelector("#weightInput");
+  ui.packageIndexInput = document.querySelector("#packageIndexInput");
   ui.barcodeInput = document.querySelector("#barcodeInput");
   ui.openScannerBtn = document.querySelector("#openScannerBtn");
+  ui.scanLabelBtn = document.querySelector("#scanLabelBtn");
+  ui.labelImageInput = document.querySelector("#labelImageInput");
+  ui.ocrStatus = document.querySelector("#ocrStatus");
   ui.baqueForm = document.querySelector("#baqueForm");
   ui.baqueNameInput = document.querySelector("#baqueNameInput");
   ui.baqueLocationInput = document.querySelector("#baqueLocationInput");
@@ -47,12 +61,15 @@ function bindEvents() {
   ui.baqueForm.addEventListener("submit", handleBaqueSubmit);
   ui.searchInput.addEventListener("input", renderSearchResults);
   ui.openScannerBtn.addEventListener("click", openScanner);
+  ui.scanLabelBtn.addEventListener("click", openLabelScanner);
+  ui.labelImageInput.addEventListener("change", handleLabelImageChange);
   ui.closeScannerBtn.addEventListener("click", closeScanner);
   ui.scannerModal.addEventListener("click", handleModalClick);
   ui.baquesGrid.addEventListener("click", handleBaqueGridClick);
   ui.baquesGrid.addEventListener("change", handleBaqueGridChange);
   window.addEventListener("beforeunload", () => {
     void stopScanner();
+    void stopOcrWorker();
   });
 }
 
@@ -83,6 +100,13 @@ function loadState() {
         barcode: String(parcel.barcode || "").trim(),
         routeCode: String(parcel.routeCode || "").trim().toUpperCase(),
         destination: String(parcel.destination || "").trim(),
+        client: String(parcel.client || "").trim(),
+        description: String(parcel.description || "").trim(),
+        routeLabel: String(parcel.routeLabel || "").trim(),
+        reference: String(parcel.reference || "").trim(),
+        shippingDate: String(parcel.shippingDate || "").trim(),
+        weight: String(parcel.weight || "").trim(),
+        packageIndex: String(parcel.packageIndex || "").trim(),
         currentBaqueId: parcel.currentBaqueId,
         originBaqueId: parcel.originBaqueId || parcel.currentBaqueId,
         originBaqueLabel: String(parcel.originBaqueLabel || ""),
@@ -267,18 +291,27 @@ function parcelTemplate(parcel) {
       `,
     )
     .join("");
+  const detailLines = [
+    `Destination <strong>${escapeHtml(parcel.destination)}</strong>`,
+    parcel.client ? `Client : ${escapeHtml(parcel.client)}` : "",
+    parcel.routeCode ? `Numero destination : ${escapeHtml(parcel.routeCode)}` : "",
+    parcel.routeLabel ? `Route : ${escapeHtml(parcel.routeLabel)}` : "",
+    parcel.reference ? `Reference : ${escapeHtml(parcel.reference)}` : "",
+    parcel.packageIndex ? `Colis : ${escapeHtml(parcel.packageIndex)}` : "",
+    parcel.weight ? `Poids : ${escapeHtml(parcel.weight)}` : "",
+    parcel.shippingDate ? `Date : ${escapeHtml(parcel.shippingDate)}` : "",
+    `Origine : ${escapeHtml(getOriginLabel(parcel))}`,
+    `Derniere mise a jour : ${escapeHtml(formatDate(parcel.updatedAt || parcel.createdAt))}`,
+  ]
+    .filter(Boolean)
+    .join("<br>");
 
   return `
     <article class="parcel-item" data-parcel-id="${escapeHtml(parcel.id)}">
       <div class="parcel-item__top">
         <div>
           <p class="parcel-code">${escapeHtml(parcel.barcode)}</p>
-          <p class="parcel-meta">
-            Destination <strong>${escapeHtml(parcel.destination)}</strong><br>
-            ${parcel.routeCode ? `Numero destination : ${escapeHtml(parcel.routeCode)}<br>` : ""}
-            Origine : ${escapeHtml(getOriginLabel(parcel))}<br>
-            Derniere mise a jour : ${escapeHtml(formatDate(parcel.updatedAt || parcel.createdAt))}
-          </p>
+          <p class="parcel-meta">${detailLines}</p>
         </div>
         <span class="tag">Destination ${escapeHtml(parcel.destination)}</span>
       </div>
@@ -327,6 +360,13 @@ function renderSearchResults() {
       parcel.barcode,
       parcel.routeCode || "",
       parcel.destination,
+      parcel.client || "",
+      parcel.description || "",
+      parcel.routeLabel || "",
+      parcel.reference || "",
+      parcel.shippingDate || "",
+      parcel.weight || "",
+      parcel.packageIndex || "",
       baque?.name || "",
       baque?.location || "",
       getOriginLabel(parcel),
@@ -357,6 +397,13 @@ function renderSearchResults() {
           <div class="search-card__meta">
             ${parcel.routeCode ? `<span><strong>Numero destination :</strong> ${escapeHtml(parcel.routeCode)}</span>` : ""}
             <span><strong>Destination :</strong> ${escapeHtml(parcel.destination)}</span>
+            ${parcel.client ? `<span><strong>Client :</strong> ${escapeHtml(parcel.client)}</span>` : ""}
+            ${parcel.description ? `<span><strong>Description :</strong> ${escapeHtml(parcel.description)}</span>` : ""}
+            ${parcel.routeLabel ? `<span><strong>Route :</strong> ${escapeHtml(parcel.routeLabel)}</span>` : ""}
+            ${parcel.reference ? `<span><strong>Reference :</strong> ${escapeHtml(parcel.reference)}</span>` : ""}
+            ${parcel.packageIndex ? `<span><strong>Colis :</strong> ${escapeHtml(parcel.packageIndex)}</span>` : ""}
+            ${parcel.weight ? `<span><strong>Poids :</strong> ${escapeHtml(parcel.weight)}</span>` : ""}
+            ${parcel.shippingDate ? `<span><strong>Date :</strong> ${escapeHtml(parcel.shippingDate)}</span>` : ""}
             <span><strong>Baque actuelle :</strong> ${escapeHtml(baque?.name || "Baque supprimee")}</span>
             <span><strong>Emplacement :</strong> ${escapeHtml(baque?.location || "Inconnu")}</span>
             <span><strong>Origine :</strong> ${escapeHtml(getOriginLabel(parcel))}</span>
@@ -450,10 +497,300 @@ function handleModalClick(event) {
   }
 }
 
+function openLabelScanner() {
+  if (ocr.busy) {
+    return;
+  }
+
+  ui.labelImageInput.click();
+}
+
+async function handleLabelImageChange(event) {
+  const file = event.target.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  if (typeof window.Tesseract?.createWorker !== "function") {
+    showToast("Le module OCR n'est pas disponible.", "danger");
+    ui.labelImageInput.value = "";
+    return;
+  }
+
+  try {
+    setOcrBusy(true);
+    ui.ocrStatus.textContent = "Analyse de l'etiquette en cours...";
+
+    const worker = await getOcrWorker();
+    const result = await worker.recognize(file);
+    const parsed = parseLabelText(result.data.text);
+
+    applyParsedLabelData(parsed);
+
+    if (!parsed.barcode && !parsed.destination && !parsed.routeCode) {
+      ui.ocrStatus.textContent = "Lecture terminee, mais peu d'informations ont ete reconnues. Reprenez une photo plus nette.";
+      showToast("OCR termine avec peu de donnees. Essayez une photo plus nette.", "danger");
+      return;
+    }
+
+    ui.ocrStatus.textContent = "Etiquette analysee. Verifiez les champs puis enregistrez le colis.";
+    showToast("Etiquette analysee. Les informations ont ete remplies.");
+  } catch (error) {
+    ui.ocrStatus.textContent = "Impossible de lire l'etiquette. Essayez une photo bien droite et nette.";
+    showToast("Impossible de lire l'etiquette. Reessayez avec une photo plus nette.", "danger");
+  } finally {
+    setOcrBusy(false);
+    ui.labelImageInput.value = "";
+  }
+}
+
+function setOcrBusy(isBusy) {
+  ocr.busy = isBusy;
+  ui.scanLabelBtn.disabled = isBusy;
+  ui.scanLabelBtn.textContent = isBusy ? "Analyse etiquette..." : "Scanner etiquette complete";
+}
+
+async function getOcrWorker() {
+  if (ocr.worker) {
+    return ocr.worker;
+  }
+
+  ocr.worker = await Tesseract.createWorker("fra+eng");
+  return ocr.worker;
+}
+
+async function stopOcrWorker() {
+  if (!ocr.worker) {
+    return;
+  }
+
+  try {
+    await ocr.worker.terminate();
+  } catch (error) {
+    // Le worker peut deja etre arrete.
+  }
+
+  ocr.worker = null;
+}
+
+function applyParsedLabelData(parsed) {
+  if (parsed.routeCode) {
+    ui.routeCodeInput.value = parsed.routeCode;
+  }
+
+  if (parsed.destination) {
+    ui.destinationInput.value = parsed.destination;
+  }
+
+  if (parsed.client) {
+    ui.clientInput.value = parsed.client;
+  }
+
+  if (parsed.description) {
+    ui.descriptionInput.value = parsed.description;
+  }
+
+  if (parsed.routeLabel) {
+    ui.routeLabelInput.value = parsed.routeLabel;
+  }
+
+  if (parsed.reference) {
+    ui.referenceInput.value = parsed.reference;
+  }
+
+  if (parsed.shippingDate) {
+    ui.shippingDateInput.value = parsed.shippingDate;
+  }
+
+  if (parsed.weight) {
+    ui.weightInput.value = parsed.weight;
+  }
+
+  if (parsed.packageIndex) {
+    ui.packageIndexInput.value = parsed.packageIndex;
+  }
+
+  if (parsed.barcode) {
+    ui.barcodeInput.value = parsed.barcode;
+  }
+}
+
+function parseLabelText(text) {
+  const lines = text
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => normalizeOcrLine(line))
+    .filter(Boolean);
+  const sections = extractLabelSections(lines);
+
+  return {
+    rawText: text,
+    barcode: extractCommandeNumber(lines, text),
+    routeCode: extractRouteCode(lines, text),
+    destination: extractDestination(lines, sections),
+    client: sections.client,
+    description: sections.description,
+    routeLabel: sections.route,
+    reference: sections.reference,
+    shippingDate: extractShippingDate(text),
+    weight: extractWeight(text),
+    packageIndex: extractPackageIndex(text),
+  };
+}
+
+function extractLabelSections(lines) {
+  const sections = {
+    client: [],
+    address: [],
+    description: [],
+    route: [],
+    reference: [],
+  };
+  let currentSection = "";
+
+  for (const line of lines) {
+    const match = matchSectionHeader(line);
+    if (match) {
+      currentSection = match.section;
+      if (match.inlineValue) {
+        sections[currentSection].push(match.inlineValue);
+      }
+      continue;
+    }
+
+    if (!currentSection) {
+      continue;
+    }
+
+    if (looksLikeMetaLine(line)) {
+      continue;
+    }
+
+    sections[currentSection].push(line);
+  }
+
+  return {
+    client: joinSectionLines(sections.client),
+    address: joinSectionLines(sections.address, ", "),
+    description: joinSectionLines(sections.description),
+    route: joinSectionLines(sections.route),
+    reference: joinSectionLines(sections.reference),
+  };
+}
+
+function matchSectionHeader(line) {
+  const patterns = [
+    { section: "client", regex: /^CLIENT\b[:\s-]*(.*)$/i },
+    { section: "address", regex: /^ADRESSE\b[:\s-]*(.*)$/i },
+    { section: "description", regex: /^DESCRIPTION\b[:\s-]*(.*)$/i },
+    { section: "route", regex: /^ROUTE\b[:\s-]*(.*)$/i },
+    { section: "reference", regex: /^REF\b[:\s-]*(.*)$/i },
+  ];
+
+  for (const pattern of patterns) {
+    const result = line.match(pattern.regex);
+    if (result) {
+      return {
+        section: pattern.section,
+        inlineValue: normalizeFreeText(result[1] || ""),
+      };
+    }
+  }
+
+  return null;
+}
+
+function looksLikeMetaLine(line) {
+  return [
+    /GAVIOTA/i,
+    /SALEILLES/i,
+    /C\.?I\.?F/i,
+    /^TEL/i,
+    /COMMANDE/i,
+    /^DATE/i,
+    /^\d+\s*\/\s*\d+$/,
+    /^\d+[.,]\d+\s*KG$/i,
+    /^R\s*(?:\d\s*){5,7}$/i,
+  ].some((regex) => regex.test(line));
+}
+
+function extractCommandeNumber(lines, text) {
+  const directMatch = text.match(/(?:N\W*COMMANDE|COMMANDE)\W*([A-Z0-9]{5,})/i);
+  if (directMatch) {
+    return directMatch[1].replace(/\s+/g, "");
+  }
+
+  const commandIndex = lines.findIndex((line) => /COMMANDE/i.test(line));
+  if (commandIndex >= 0) {
+    const nextLine = lines[commandIndex + 1] || "";
+    const fallbackMatch = nextLine.match(/[A-Z0-9]{5,}/i);
+    if (fallbackMatch) {
+      return fallbackMatch[0].replace(/\s+/g, "");
+    }
+  }
+
+  return "";
+}
+
+function extractRouteCode(lines, text) {
+  const routeCodeRegex = /\bR\s*(?:\d\s*){5,7}\b/i;
+  const fromLines = lines.find((line) => routeCodeRegex.test(line));
+  if (fromLines) {
+    return normalizeRouteCode(fromLines.match(routeCodeRegex)[0]);
+  }
+
+  const fromText = text.match(routeCodeRegex);
+  return fromText ? normalizeRouteCode(fromText[0]) : "";
+}
+
+function extractDestination(lines, sections) {
+  if (sections.address) {
+    return sections.address;
+  }
+
+  const postalLine = lines.find((line) => /\b\d{5}\b/.test(line) && !/SALEILLES/i.test(line));
+  return postalLine ? normalizeFreeText(postalLine) : "";
+}
+
+function extractShippingDate(text) {
+  const match = text.match(/\b\d{2}\/\d{2}\/\d{4}\b/);
+  return match ? match[0] : "";
+}
+
+function extractWeight(text) {
+  const match = text.match(/\b\d{1,3}[.,]\d{1,2}\s*Kg\b/i);
+  return match ? normalizeFreeText(match[0].replace(/\s+/g, " ")) : "";
+}
+
+function extractPackageIndex(text) {
+  const match = text.match(/\b\d+\s*\/\s*\d+\b/);
+  return match ? match[0].replace(/\s+/g, "") : "";
+}
+
+function joinSectionLines(lines, separator = " ") {
+  return normalizeFreeText(lines.filter(Boolean).join(separator));
+}
+
+function normalizeOcrLine(value) {
+  return normalizeFreeText(
+    value
+      .replace(/[|]/g, "I")
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'"),
+  );
+}
+
 function upsertParcel(scannedBarcode = "") {
   const baqueId = ui.parcelBaqueSelect.value;
   const routeCode = normalizeRouteCode(ui.routeCodeInput.value);
   const destination = normalizeDestination(ui.destinationInput.value);
+  const client = normalizeFreeText(ui.clientInput.value);
+  const description = normalizeFreeText(ui.descriptionInput.value);
+  const routeLabel = normalizeFreeText(ui.routeLabelInput.value);
+  const reference = normalizeFreeText(ui.referenceInput.value);
+  const shippingDate = normalizeFreeText(ui.shippingDateInput.value);
+  const weight = normalizeFreeText(ui.weightInput.value);
+  const packageIndex = normalizeFreeText(ui.packageIndexInput.value);
   const barcode = normalizeBarcode(scannedBarcode || ui.barcodeInput.value);
 
   if (!baqueId || !destination || !barcode) {
@@ -474,6 +811,13 @@ function upsertParcel(scannedBarcode = "") {
     const moved = existing.currentBaqueId !== baqueId;
     existing.routeCode = routeCode;
     existing.destination = destination;
+    existing.client = client;
+    existing.description = description;
+    existing.routeLabel = routeLabel;
+    existing.reference = reference;
+    existing.shippingDate = shippingDate;
+    existing.weight = weight;
+    existing.packageIndex = packageIndex;
     existing.currentBaqueId = baqueId;
     existing.updatedAt = now;
 
@@ -493,6 +837,13 @@ function upsertParcel(scannedBarcode = "") {
     barcode,
     routeCode,
     destination,
+    client,
+    description,
+    routeLabel,
+    reference,
+    shippingDate,
+    weight,
+    packageIndex,
     currentBaqueId: baqueId,
     originBaqueId: baqueId,
     originBaqueLabel: baque.name,
@@ -510,7 +861,15 @@ function upsertParcel(scannedBarcode = "") {
 function clearParcelForm() {
   ui.routeCodeInput.value = "";
   ui.destinationInput.value = "";
+  ui.clientInput.value = "";
+  ui.descriptionInput.value = "";
+  ui.routeLabelInput.value = "";
+  ui.referenceInput.value = "";
+  ui.shippingDateInput.value = "";
+  ui.weightInput.value = "";
+  ui.packageIndexInput.value = "";
   ui.barcodeInput.value = "";
+  ui.ocrStatus.textContent = "";
   ui.destinationInput.focus();
 }
 
@@ -715,11 +1074,15 @@ function createId() {
 }
 
 function normalizeDestination(value) {
-  return value.trim().replace(/\s+/g, " ");
+  return normalizeFreeText(value);
 }
 
 function normalizeRouteCode(value) {
-  return value.trim().toUpperCase();
+  return normalizeFreeText(value).replace(/\s+/g, "").toUpperCase();
+}
+
+function normalizeFreeText(value) {
+  return value.trim().replace(/\s+/g, " ");
 }
 
 function normalizeBarcode(value) {
