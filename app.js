@@ -12,6 +12,7 @@ const scanner = {
   instance: null,
   active: false,
   handled: false,
+  importingBarcode: false,
 };
 const ocr = {
   worker: null,
@@ -39,9 +40,12 @@ function cacheElements() {
   ui.packageIndexInput = document.querySelector("#packageIndexInput");
   ui.barcodeInput = document.querySelector("#barcodeInput");
   ui.openScannerBtn = document.querySelector("#openScannerBtn");
+  ui.importBarcodeBtn = document.querySelector("#importBarcodeBtn");
   ui.scanLabelBtn = document.querySelector("#scanLabelBtn");
   ui.labelImageInput = document.querySelector("#labelImageInput");
+  ui.barcodeImageInput = document.querySelector("#barcodeImageInput");
   ui.ocrStatus = document.querySelector("#ocrStatus");
+  ui.barcodeStatus = document.querySelector("#barcodeStatus");
   ui.baqueForm = document.querySelector("#baqueForm");
   ui.baqueNameInput = document.querySelector("#baqueNameInput");
   ui.baqueLocationInput = document.querySelector("#baqueLocationInput");
@@ -54,6 +58,7 @@ function cacheElements() {
   ui.scannerStatus = document.querySelector("#scannerStatus");
   ui.closeScannerBtn = document.querySelector("#closeScannerBtn");
   ui.toastZone = document.querySelector("#toastZone");
+  ui.barcodeFileReader = document.querySelector("#barcodeFileReader");
 }
 
 function bindEvents() {
@@ -61,7 +66,9 @@ function bindEvents() {
   ui.baqueForm.addEventListener("submit", handleBaqueSubmit);
   ui.searchInput.addEventListener("input", renderSearchResults);
   ui.openScannerBtn.addEventListener("click", openScanner);
+  ui.importBarcodeBtn.addEventListener("click", openBarcodeImagePicker);
   ui.scanLabelBtn.addEventListener("click", openLabelScanner);
+  ui.barcodeImageInput.addEventListener("change", handleBarcodeImageChange);
   ui.labelImageInput.addEventListener("change", handleLabelImageChange);
   ui.closeScannerBtn.addEventListener("click", closeScanner);
   ui.scannerModal.addEventListener("click", handleModalClick);
@@ -518,6 +525,63 @@ function openLabelScanner() {
   ui.labelImageInput.click();
 }
 
+function openBarcodeImagePicker() {
+  if (scanner.importingBarcode) {
+    return;
+  }
+
+  ui.barcodeImageInput.click();
+}
+
+async function handleBarcodeImageChange(event) {
+  const file = event.target.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  if (typeof window.Html5Qrcode === "undefined") {
+    showToast("La librairie de scan n'a pas pu etre chargee.", "danger");
+    ui.barcodeImageInput.value = "";
+    return;
+  }
+
+  let fileScanner = null;
+
+  try {
+    setBarcodeImportBusy(true);
+    ui.barcodeStatus.textContent = "Analyse de la photo du code-barres...";
+
+    fileScanner = new Html5Qrcode("barcodeFileReader");
+    const decodedText = await fileScanner.scanFile(file, false);
+    const normalizedCode = decodedText.trim();
+
+    ui.barcodeInput.value = normalizedCode;
+
+    const added = upsertParcel(normalizedCode);
+    if (!added) {
+      ui.barcodeStatus.textContent = "Code-barres detecte. Verifiez le numero destination puis enregistrez.";
+      showToast("Code-barres detecte.");
+    } else {
+      ui.barcodeStatus.textContent = "Code-barres detecte et applique au colis.";
+    }
+  } catch (error) {
+    ui.barcodeStatus.textContent = "Impossible de lire le code-barres sur cette photo.";
+    showToast("Impossible de lire le code-barres. Essayez une photo plus nette.", "danger");
+  } finally {
+    if (fileScanner) {
+      try {
+        await fileScanner.clear();
+      } catch (error) {
+        // Rien a faire si le lecteur fichier est deja nettoye.
+      }
+    }
+
+    ui.barcodeFileReader.innerHTML = "";
+    ui.barcodeImageInput.value = "";
+    setBarcodeImportBusy(false);
+  }
+}
+
 async function handleLabelImageChange(event) {
   const file = event.target.files?.[0];
   if (!file) {
@@ -560,7 +624,13 @@ async function handleLabelImageChange(event) {
 function setOcrBusy(isBusy) {
   ocr.busy = isBusy;
   ui.scanLabelBtn.disabled = isBusy;
-  ui.scanLabelBtn.textContent = isBusy ? "Analyse etiquette..." : "Scanner etiquette complete";
+  ui.scanLabelBtn.textContent = isBusy ? "Analyse etiquette..." : "Importer photo etiquette";
+}
+
+function setBarcodeImportBusy(isBusy) {
+  scanner.importingBarcode = isBusy;
+  ui.importBarcodeBtn.disabled = isBusy;
+  ui.importBarcodeBtn.textContent = isBusy ? "Analyse code-barres..." : "Importer photo code-barres";
 }
 
 async function getOcrWorker() {
@@ -908,6 +978,7 @@ function clearParcelForm() {
   ui.packageIndexInput.value = "";
   ui.barcodeInput.value = "";
   ui.ocrStatus.textContent = "";
+  ui.barcodeStatus.textContent = "";
   ui.routeCodeInput.focus();
 }
 

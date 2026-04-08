@@ -33,7 +33,7 @@
       <div class="brand-mark brand-mark--gaviota">
         <img
           class="brand-logo brand-logo--gaviota"
-          src="assets/gaviota-logo.svg"
+          src="assets/gaviota-logo-official.svg"
           alt="Gaviota"
         >
       </div>
@@ -54,7 +54,7 @@
         <div class="hero__side-label">Flux conseille</div>
         <ol class="flow-list">
           <li>Choisir la baque actuelle du colis.</li>
-          <li>Utiliser "Scanner etiquette complete" pour remplir automatiquement les champs.</li>
+          <li>Utiliser "Importer photo etiquette" pour remplir automatiquement les champs.</li>
           <li>Verifier au minimum le numero destination, puis enregistrer le colis.</li>
           <li>Deplacer, rechercher ou supprimer le colis quand son emplacement change.</li>
         </ol>
@@ -186,20 +186,66 @@
               >
             </label>
 
-            <div class="actions">
-              <button id="scanLabelBtn" class="btn btn--accent" type="button">
-                Scanner etiquette complete
-              </button>
-              <button id="openScannerBtn" class="btn btn--secondary" type="button">
-                Scanner code-barres
-              </button>
+            <div class="capture-stack">
+              <article class="capture-card capture-card--primary">
+                <div class="capture-card__head">
+                  <div>
+                    <p class="capture-card__eyebrow">Conseille sur iPhone</p>
+                    <h3>Photo etiquette complete</h3>
+                  </div>
+                  <span class="capture-badge">Auto</span>
+                </div>
+                <p class="capture-card__copy">
+                  Prend une photo de l'etiquette. Le site essaie de remplir automatiquement le numero destination,
+                  la destination complete, le client, la date, le poids et les autres champs.
+                </p>
+                <button id="scanLabelBtn" class="btn btn--accent capture-card__button" type="button">
+                  Importer photo etiquette
+                </button>
+                <p id="ocrStatus" class="field-help capture-card__status"></p>
+              </article>
+
+              <article class="capture-card">
+                <div class="capture-card__head">
+                  <div>
+                    <p class="capture-card__eyebrow">Rapide</p>
+                    <h3>Photo code-barres</h3>
+                  </div>
+                  <span class="capture-badge">Code</span>
+                </div>
+                <p class="capture-card__copy">
+                  Importez une photo centree sur le code-barres si vous voulez juste recuperer le numero lu.
+                </p>
+                <button id="importBarcodeBtn" class="btn btn--secondary capture-card__button" type="button">
+                  Importer photo code-barres
+                </button>
+                <p id="barcodeStatus" class="field-help capture-card__status"></p>
+              </article>
+
+              <article class="capture-card capture-card--compact">
+                <div class="capture-card__head">
+                  <div>
+                    <p class="capture-card__eyebrow">Option secondaire</p>
+                    <h3>Scanner en direct</h3>
+                  </div>
+                </div>
+                <p class="capture-card__copy">
+                  Utilise la camera en direct pour viser un code-barres sans passer par une photo.
+                </p>
+                <button id="openScannerBtn" class="btn btn--secondary capture-card__button" type="button">
+                  Ouvrir le scanner
+                </button>
+              </article>
+            </div>
+
+            <div class="actions actions--submit">
               <button class="btn btn--primary" type="submit">
                 Enregistrer le colis
               </button>
             </div>
 
             <input id="labelImageInput" type="file" accept="image/*" capture="environment" class="hidden-input">
-            <p id="ocrStatus" class="field-help"></p>
+            <input id="barcodeImageInput" type="file" accept="image/*" capture="environment" class="hidden-input">
 
             <p class="field-help">
               Le numero destination est obligatoire. Tous les autres champs sont optionnels et peuvent etre remplis automatiquement par le scan d'etiquette.
@@ -317,5 +363,6 @@
   </div>
 
   <div id="toastZone" class="toast-zone" aria-live="polite" aria-atomic="true"></div>
+  <div id="barcodeFileReader" class="hidden-input" aria-hidden="true"></div>
 </body>
 </html>
