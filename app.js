@@ -9,10 +9,8 @@ const DEFAULT_BAQUES = [
 const state = loadState();
 const ui = {};
 const scanner = {
-  detector: null,
-  stream: null,
+  instance: null,
   active: false,
-  frameId: 0,
   handled: false,
 };
 
@@ -38,7 +36,7 @@ function cacheElements() {
   ui.destinationSummary = document.querySelector("#destinationSummary");
   ui.baquesGrid = document.querySelector("#baquesGrid");
   ui.scannerModal = document.querySelector("#scannerModal");
-  ui.scannerVideo = document.querySelector("#scannerVideo");
+  ui.reader = document.querySelector("#reader");
   ui.scannerStatus = document.querySelector("#scannerStatus");
   ui.closeScannerBtn = document.querySelector("#closeScannerBtn");
   ui.toastZone = document.querySelector("#toastZone");
@@ -590,90 +588,76 @@ function moveParcel(parcelId) {
 }
 
 async function openScanner() {
-  if (!("BarcodeDetector" in window)) {
-    showToast("Le scan camera n'est pas pris en charge par ce navigateur.", "danger");
-    ui.scannerStatus.textContent = "Utilisez Chrome ou Edge recent, ou saisissez le code-barres manuellement.";
+  if (typeof window.Html5QrcodeScanner === "undefined") {
+    showToast("La librairie de scan n'a pas pu etre chargee.", "danger");
+    return;
+  }
+
+  if (scanner.active) {
     ui.scannerModal.classList.remove("hidden");
     ui.scannerModal.setAttribute("aria-hidden", "false");
     return;
   }
 
-  if (window.location.protocol === "file:") {
-    showToast("Lancez le site via localhost pour utiliser la camera.", "danger");
-    ui.scannerStatus.textContent = "Ouvrez ce projet sur http://localhost:4173 avec serve-local.ps1.";
-    ui.scannerModal.classList.remove("hidden");
-    ui.scannerModal.setAttribute("aria-hidden", "false");
-    return;
-  }
-
-  ui.scannerStatus.textContent = "Demande d'acces a la camera...";
+  scanner.handled = false;
+  ui.scannerStatus.textContent = "Autorisez la camera ou utilisez le scan par image si besoin.";
   ui.scannerModal.classList.remove("hidden");
   ui.scannerModal.setAttribute("aria-hidden", "false");
 
   try {
-    const formats = typeof BarcodeDetector.getSupportedFormats === "function"
-      ? await BarcodeDetector.getSupportedFormats()
-      : [];
-
-    const preferredFormats = [
-      "code_128",
-      "code_39",
-      "code_93",
-      "ean_13",
-      "ean_8",
-      "upc_a",
-      "upc_e",
-      "itf",
-      "codabar",
-    ];
-
-    const supportedFormats = preferredFormats.filter((format) => formats.includes(format));
-    scanner.detector = new BarcodeDetector(
-      supportedFormats.length ? { formats: supportedFormats } : undefined,
+    scanner.instance = new Html5QrcodeScanner(
+      "reader",
+      {
+        fps: 10,
+        qrbox: { width: 320, height: 140 },
+        aspectRatio: 1.7777778,
+        rememberLastUsedCamera: true,
+        showTorchButtonIfSupported: true,
+        supportedScanTypes: [
+          Html5QrcodeScanType.SCAN_TYPE_CAMERA,
+          Html5QrcodeScanType.SCAN_TYPE_FILE,
+        ],
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.CODE_93,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.ITF,
+          Html5QrcodeSupportedFormats.CODABAR,
+        ],
+      },
+      false,
     );
 
-    scanner.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: "environment" } },
-      audio: false,
-    });
+    scanner.instance.render(
+      async (decodedText) => {
+        if (scanner.handled) {
+          return;
+        }
 
-    ui.scannerVideo.srcObject = scanner.stream;
-    await ui.scannerVideo.play();
+        scanner.handled = true;
+        ui.barcodeInput.value = decodedText.trim();
+        const added = upsertParcel(decodedText.trim());
+        if (!added) {
+          showToast("Code detecte. Completez les champs puis validez.");
+        }
+
+        await closeScanner();
+      },
+      () => {},
+    );
 
     scanner.active = true;
-    scanner.handled = false;
-    ui.scannerStatus.textContent = "Camera active. Placez le code-barres dans le cadre.";
-    scanFrame();
+    ui.scannerStatus.textContent = "Scanner actif. Vous pouvez utiliser la camera ou importer une photo du code.";
   } catch (error) {
-    await closeScanner();
-    showToast("Impossible de lancer la camera. Verifiez les permissions.", "danger");
+    await stopScanner();
+    ui.scannerModal.classList.add("hidden");
+    ui.scannerModal.setAttribute("aria-hidden", "true");
+    showToast("Impossible de lancer le scanner. Verifiez les permissions camera.", "danger");
   }
-}
-
-async function scanFrame() {
-  if (!scanner.active || !scanner.detector) {
-    return;
-  }
-
-  try {
-    const results = await scanner.detector.detect(ui.scannerVideo);
-    if (results.length && results[0].rawValue && !scanner.handled) {
-      scanner.handled = true;
-      ui.barcodeInput.value = results[0].rawValue.trim();
-      const added = upsertParcel(results[0].rawValue.trim());
-      if (!added) {
-        showToast("Code detecte. Completez les champs puis validez.");
-      }
-      await closeScanner();
-      return;
-    }
-  } catch (error) {
-    ui.scannerStatus.textContent = "Detection en cours...";
-  }
-
-  scanner.frameId = window.requestAnimationFrame(() => {
-    void scanFrame();
-  });
 }
 
 async function closeScanner() {
@@ -687,22 +671,19 @@ async function stopScanner() {
   scanner.active = false;
   scanner.handled = false;
 
-  if (scanner.frameId) {
-    window.cancelAnimationFrame(scanner.frameId);
-    scanner.frameId = 0;
+  if (scanner.instance) {
+    try {
+      await scanner.instance.clear();
+    } catch (error) {
+      // Le scanner peut deja etre libere si l'utilisateur a ferme la camera.
+    }
+
+    scanner.instance = null;
   }
 
-  if (scanner.stream) {
-    scanner.stream.getTracks().forEach((track) => track.stop());
-    scanner.stream = null;
+  if (ui.reader) {
+    ui.reader.innerHTML = "";
   }
-
-  if (ui.scannerVideo) {
-    ui.scannerVideo.pause();
-    ui.scannerVideo.srcObject = null;
-  }
-
-  scanner.detector = null;
 }
 
 function getParcelsForBaque(baqueId) {

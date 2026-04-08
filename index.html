@@ -15,6 +15,7 @@
     rel="stylesheet"
   >
   <link rel="stylesheet" href="styles.css">
+  <script src="vendor/html5-qrcode.min.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -206,11 +207,12 @@
       </div>
 
       <div class="scanner-frame">
-        <video id="scannerVideo" class="scanner-video" playsinline muted></video>
+        <div id="reader" class="reader"></div>
       </div>
 
       <p class="scanner-help">
         Le colis sera ajoute automatiquement si la baque et la destination sont deja remplies.
+        Si besoin, vous pouvez aussi choisir une image du code-barres.
       </p>
       <p id="scannerStatus" class="scanner-status"></p>
     </div>

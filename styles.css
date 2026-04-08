@@ -512,18 +512,64 @@ code {
 
 .scanner-frame {
   overflow: hidden;
-  min-height: 320px;
   border-radius: 20px;
   border: 1px solid rgba(36, 78, 115, 0.1);
   background:
     linear-gradient(180deg, #d9ebf7 0%, #edf5fb 100%);
 }
 
-.scanner-video {
+.reader {
   width: 100%;
   min-height: 320px;
-  object-fit: cover;
   display: block;
+}
+
+.reader video,
+.reader img {
+  width: 100%;
+  display: block;
+  border-radius: 18px;
+}
+
+.reader button,
+.reader select,
+.reader input[type="file"] {
+  font: inherit;
+}
+
+.reader button {
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary-deep), var(--primary-strong));
+}
+
+.reader select,
+.reader input[type="file"] {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--surface-strong);
+  color: var(--text);
+}
+
+.reader a {
+  color: var(--primary-deep);
+}
+
+.reader__dashboard,
+#reader__dashboard {
+  padding: 16px 0 0;
+  color: var(--text);
+}
+
+.reader__scan_region,
+#reader__scan_region {
+  overflow: hidden;
+  border-radius: 18px;
 }
 
 .scanner-status {
