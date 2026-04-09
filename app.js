@@ -745,6 +745,9 @@ function renderDeliveryNotes() {
 
 function deliveryNoteTemplate(note) {
   const analysis = note.analysis || null;
+  const zeroMatchNote = analysis && !analysis.parseError && analysis.totalEntries > 0 && analysis.totalRegisteredCount === 0
+    ? `<p class="field-help">${escapeHtml("Aucune correspondance detectee avec les colis enregistres. Verifiez que ce bon de livraison correspond bien a la meme tournee et que les colis ont un numero de commande saisi ou scanne.")}</p>`
+    : "";
   const incomparablesNote = analysis?.incomparableParcelsCount
     ? `<p class="field-help">${escapeHtml(`${analysis.incomparableParcelsCount} colis enregistres sans numero de commande ne peuvent pas etre compares au PDF.`)}</p>`
     : "";
@@ -776,6 +779,7 @@ function deliveryNoteTemplate(note) {
         <span class="distribution-chip">Enregistres : ${escapeHtml(String(analysis.totalRegisteredCount))}</span>
         <span class="distribution-chip distribution-chip--alert">Manquants : ${escapeHtml(String(analysis.totalMissingCount))}</span>
       </div>
+      ${zeroMatchNote}
       ${incomparablesNote}
       ${resultDetails}
     `

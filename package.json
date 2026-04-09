@@ -1,0 +1,21 @@
+{
+  "name": "transbaus-gaviota",
+  "version": "1.0.0",
+  "description": "Application web de tri de colis pour TransBaus / Gaviota.",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThomasMrs/Transbaus-Gaviota.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/ThomasMrs/Transbaus-Gaviota/issues"
+  },
+  "homepage": "https://github.com/ThomasMrs/Transbaus-Gaviota#readme"
+}
