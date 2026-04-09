@@ -361,6 +361,7 @@ function loadState() {
       .map((parcel) => normalizeParcelData({
         id: parcel.id || createId(),
         barcode: String(parcel.barcode || "").trim(),
+        commandNumber: String(parcel.commandNumber || "").trim(),
         routeCode: String(parcel.routeCode || "").trim().toUpperCase(),
         destination: String(parcel.destination || "").trim(),
         client: String(parcel.client || "").trim(),
@@ -376,7 +377,7 @@ function loadState() {
         createdAt: parcel.createdAt || new Date().toISOString(),
         updatedAt: parcel.updatedAt || parcel.createdAt || new Date().toISOString(),
       }))
-      .filter((parcel) => parcel.routeCode || parcel.barcode || parcel.destination);
+      .filter((parcel) => parcel.routeCode || parcel.commandNumber || parcel.barcode || parcel.destination);
     const deliveryNotes = Array.isArray(parsed.deliveryNotes)
       ? parsed.deliveryNotes
         .map((note) => normalizeDeliveryNote(note))
@@ -596,6 +597,8 @@ function parcelTemplate(parcel) {
   const displayRouteCode = formatRouteCodeForDisplay(parcel.routeCode);
   const detailLines = [
     `Destination <strong>${escapeHtml(displayDestination)}</strong>`,
+    parcel.commandNumber ? `Numero de commande : ${escapeHtml(parcel.commandNumber)}` : "",
+    parcel.barcode && parcel.barcode !== parcel.commandNumber ? `Code-barres : ${escapeHtml(parcel.barcode)}` : "",
     parcel.client ? `Client : ${escapeHtml(parcel.client)}` : "",
     parcel.routeCode ? `Numero destination : ${escapeHtml(displayRouteCode)}` : "",
     parcel.routeLabel ? `Route : ${escapeHtml(parcel.routeLabel)}` : "",
@@ -662,6 +665,7 @@ function renderSearchResults() {
   const matches = state.parcels.filter((parcel) => {
     const baque = getBaqueById(parcel.currentBaqueId);
     const haystack = [
+      getParcelCommandNumber(parcel),
       parcel.barcode,
       parcel.routeCode || "",
       getParcelDestinationDisplay(parcel),
@@ -701,6 +705,8 @@ function renderSearchResults() {
         <article class="search-card">
           <h3>${escapeHtml(getParcelIdentifier(parcel))}</h3>
           <div class="search-card__meta">
+            ${parcel.commandNumber ? `<span><strong>Numero de commande :</strong> ${escapeHtml(parcel.commandNumber)}</span>` : ""}
+            ${parcel.barcode && parcel.barcode !== parcel.commandNumber ? `<span><strong>Code-barres :</strong> ${escapeHtml(parcel.barcode)}</span>` : ""}
             ${parcel.routeCode ? `<span><strong>Numero destination :</strong> ${escapeHtml(formatRouteCodeForDisplay(parcel.routeCode))}</span>` : ""}
             <span><strong>Destination :</strong> ${escapeHtml(displayDestination)}</span>
             ${parcel.client ? `<span><strong>Client :</strong> ${escapeHtml(parcel.client)}</span>` : ""}
@@ -739,6 +745,29 @@ function renderDeliveryNotes() {
 
 function deliveryNoteTemplate(note) {
   const analysis = note.analysis || null;
+  const incomparablesNote = analysis?.incomparableParcelsCount
+    ? `<p class="field-help">${escapeHtml(`${analysis.incomparableParcelsCount} colis enregistres sans numero de commande ne peuvent pas etre compares au PDF.`)}</p>`
+    : "";
+  const resultDetails = analysis?.parseError
+    ? `<p class="field-help">${escapeHtml(analysis.parseError)}</p>`
+    : analysis?.missingEntries.length
+    ? `
+      <div class="document-missing">
+        <p class="document-missing__title">Colis manquants</p>
+        <div class="document-missing__list">
+          ${analysis.missingEntries.map((entry) => `
+            <article class="document-missing__item">
+              <strong>${escapeHtml(entry.commandNumber)}</strong>
+              <span>${escapeHtml(String(entry.registeredCount))} / ${escapeHtml(String(entry.expectedCount))} enregistres</span>
+              <span>${escapeHtml(String(entry.missingCount))} colis manquant${entry.missingCount > 1 ? "s" : ""}</span>
+              ${entry.client ? `<span>${escapeHtml(entry.client)}</span>` : ""}
+              ${entry.city ? `<span>${escapeHtml(entry.city)}</span>` : ""}
+            </article>
+          `).join("")}
+        </div>
+      </div>
+    `
+    : `<p class="field-help">Toutes les livraisons du PDF semblent deja enregistrees.</p>`;
   const summary = analysis
     ? `
       <div class="document-summary">
@@ -747,28 +776,8 @@ function deliveryNoteTemplate(note) {
         <span class="distribution-chip">Enregistres : ${escapeHtml(String(analysis.totalRegisteredCount))}</span>
         <span class="distribution-chip distribution-chip--alert">Manquants : ${escapeHtml(String(analysis.totalMissingCount))}</span>
       </div>
-      ${analysis.parseError
-        ? `<p class="field-help">${escapeHtml(analysis.parseError)}</p>`
-        : analysis.missingEntries.length
-        ? `
-          <div class="document-missing">
-            <p class="document-missing__title">Colis manquants</p>
-            <div class="document-missing__list">
-              ${analysis.missingEntries.map((entry) => `
-                <article class="document-missing__item">
-                  <strong>${escapeHtml(entry.commandNumber)}</strong>
-                  <span>${escapeHtml(String(entry.registeredCount))} / ${escapeHtml(String(entry.expectedCount))} enregistres</span>
-                  <span>${escapeHtml(String(entry.missingCount))} colis manquant${entry.missingCount > 1 ? "s" : ""}</span>
-                  ${entry.client ? `<span>${escapeHtml(entry.client)}</span>` : ""}
-                  ${entry.city ? `<span>${escapeHtml(entry.city)}</span>` : ""}
-                </article>
-              `).join("")}
-            </div>
-          </div>
-        `
-        : `
-          <p class="field-help">Toutes les livraisons du PDF semblent deja enregistrees.</p>
-        `}
+      ${incomparablesNote}
+      ${resultDetails}
     `
     : `
       <p class="field-help">Aucune analyse de comparaison disponible pour ce PDF.</p>
@@ -1581,12 +1590,14 @@ function parseLegacyDeliveryNoteLines(lines) {
 }
 
 function compareDeliveryNoteEntries(entries) {
+  const incomparableParcelsCount = countIncomparableParcels();
   if (!entries.length) {
     return {
       totalEntries: 0,
       totalExpectedCount: 0,
       totalRegisteredCount: 0,
       totalMissingCount: 0,
+      incomparableParcelsCount,
       missingEntries: [],
       parseError: "Aucune livraison exploitable n'a ete detectee dans ce PDF. Le scan est peut-etre trop flou.",
     };
@@ -1625,6 +1636,7 @@ function compareDeliveryNoteEntries(entries) {
     totalExpectedCount,
     totalRegisteredCount,
     totalMissingCount: Math.max(0, totalExpectedCount - totalRegisteredCount),
+    incomparableParcelsCount,
     missingEntries,
     parseError: "",
   };
@@ -1731,6 +1743,7 @@ function parseLabelText(text) {
   const parsed = {
     rawText: text,
     barcode: extractCommandeNumber(lines, text),
+    commandNumber: extractCommandeNumber(lines, text),
     routeCode: extractRouteCode(lines, text),
     destination: extractDestination(lines, sections),
     client: sections.client,
@@ -1975,9 +1988,12 @@ function upsertParcel(scannedBarcode = "") {
 
   const now = new Date().toISOString();
   const existing = findExistingParcel(normalizedParcelData);
+  const commandNumber = getParcelCommandNumber(normalizedParcelData);
 
   if (existing) {
     const moved = existing.currentBaqueId !== baqueId;
+    existing.barcode = normalizedParcelData.barcode;
+    existing.commandNumber = commandNumber;
     existing.routeCode = normalizedParcelData.routeCode;
     existing.destination = normalizedParcelData.destination;
     existing.client = normalizedParcelData.client;
@@ -2004,6 +2020,7 @@ function upsertParcel(scannedBarcode = "") {
   state.parcels.unshift({
     id: createId(),
     barcode: normalizedParcelData.barcode,
+    commandNumber,
     routeCode: normalizedParcelData.routeCode,
     destination: normalizedParcelData.destination,
     client: normalizedParcelData.client,
@@ -2023,7 +2040,11 @@ function upsertParcel(scannedBarcode = "") {
   saveState();
   render();
   clearParcelForm();
-  showToast(`Colis ${getParcelIdentifier(normalizedParcelData)} ajoute dans ${baque.name}.`);
+  showToast(
+    commandNumber
+      ? `Colis ${getParcelIdentifier({ ...normalizedParcelData, commandNumber })} ajoute dans ${baque.name}.`
+      : `Colis ${getParcelIdentifier(normalizedParcelData)} ajoute dans ${baque.name}. Il ne pourra pas etre compare au PDF sans numero de commande.`,
+  );
   return true;
 }
 
@@ -2257,6 +2278,7 @@ function normalizeFreeText(value) {
 
 function normalizeParcelData(parcel) {
   const barcode = normalizeBarcode(parcel.barcode || "");
+  const explicitCommandNumber = normalizeCommandNumber(parcel.commandNumber || "");
   const routeLabel = normalizeFreeText(parcel.routeLabel || "");
   const rawDestination = sanitizeDestination(parcel.destination || "");
   const shippingDate = normalizeFreeText(parcel.shippingDate || "");
@@ -2264,10 +2286,12 @@ function normalizeParcelData(parcel) {
   const destination = reconcileDestination(rawDestination, routeCode);
   const packageIndex = sanitizePackageIndex(parcel.packageIndex || "", shippingDate);
   const normalizedBarcode = reconcileBarcode(barcode, destination, routeCode);
+  const commandNumber = reconcileCommandNumber(explicitCommandNumber, normalizedBarcode);
 
   return {
     ...parcel,
     barcode: normalizedBarcode,
+    commandNumber,
     routeCode,
     destination,
     client: normalizeFreeText(parcel.client || ""),
@@ -2289,28 +2313,48 @@ function getParcelDestinationKey(parcel) {
 }
 
 function getParcelIdentifier(parcel) {
-  return parcel.barcode || formatRouteCodeForDisplay(parcel.routeCode) || "Sans code-barres";
+  return getParcelCommandNumber(parcel) || parcel.barcode || formatRouteCodeForDisplay(parcel.routeCode) || "Sans code";
 }
 
 function findExistingParcel(parcelData) {
   const barcode = normalizeBarcode(parcelData.barcode || "");
-  const routeCode = normalizeRouteCode(parcelData.routeCode || "");
   const packageIndex = normalizeFreeText(parcelData.packageIndex || "");
+  const commandNumber = getParcelCommandNumber(parcelData);
+
+  if (commandNumber && packageIndex) {
+    const exactCommandMatch = state.parcels.find(
+      (parcel) => getParcelCommandNumber(parcel) === commandNumber && normalizeFreeText(parcel.packageIndex || "") === packageIndex,
+    );
+    if (exactCommandMatch) {
+      return exactCommandMatch;
+    }
+  }
 
   if (barcode && packageIndex) {
-    return state.parcels.find((parcel) => parcel.barcode === barcode && parcel.packageIndex === packageIndex) || null;
+    const exactBarcodeMatch = state.parcels.find(
+      (parcel) => normalizeBarcode(parcel.barcode || "") === barcode && normalizeFreeText(parcel.packageIndex || "") === packageIndex,
+    );
+    if (exactBarcodeMatch) {
+      return exactBarcodeMatch;
+    }
   }
 
-  if (barcode) {
-    return state.parcels.find((parcel) => parcel.barcode === barcode && (!parcel.packageIndex || !packageIndex)) || null;
+  if (commandNumber && !packageIndex) {
+    const commandMatches = state.parcels.filter(
+      (parcel) => getParcelCommandNumber(parcel) === commandNumber && !normalizeFreeText(parcel.packageIndex || ""),
+    );
+    if (commandMatches.length === 1) {
+      return commandMatches[0];
+    }
   }
 
-  if (routeCode && packageIndex) {
-    return state.parcels.find((parcel) => parcel.routeCode === routeCode && parcel.packageIndex === packageIndex) || null;
-  }
-
-  if (routeCode) {
-    return state.parcels.find((parcel) => parcel.routeCode === routeCode && !parcel.packageIndex) || null;
+  if (barcode && !packageIndex) {
+    const barcodeMatches = state.parcels.filter(
+      (parcel) => normalizeBarcode(parcel.barcode || "") === barcode && !normalizeFreeText(parcel.packageIndex || ""),
+    );
+    if (barcodeMatches.length === 1) {
+      return barcodeMatches[0];
+    }
   }
 
   return null;
@@ -2419,6 +2463,10 @@ function reconcileBarcode(barcode, destination, routeCode) {
   return normalizedBarcode;
 }
 
+function reconcileCommandNumber(commandNumber, barcode) {
+  return normalizeCommandNumber(commandNumber) || deriveCommandNumberFromBarcode(barcode);
+}
+
 function extractPostalCode(destination) {
   return String(destination).match(/\b\d{5}\b/)?.[0] || "";
 }
@@ -2440,6 +2488,31 @@ function renderRouteCodeMeta(parcels) {
 
 function normalizeBarcode(value) {
   return value.trim();
+}
+
+function normalizeCommandNumber(value) {
+  const normalizedValue = normalizeBarcode(String(value || ""));
+  return /^\d{5,8}$/.test(normalizedValue) ? normalizedValue : "";
+}
+
+function deriveCommandNumberFromBarcode(barcode) {
+  const normalizedBarcode = normalizeBarcode(barcode);
+  if (normalizeCommandNumber(normalizedBarcode)) {
+    return normalizedBarcode;
+  }
+
+  if (/^\d{8,11}$/.test(normalizedBarcode)) {
+    const truncatedValue = normalizedBarcode.slice(0, -3);
+    if (normalizeCommandNumber(truncatedValue)) {
+      return truncatedValue;
+    }
+  }
+
+  return "";
+}
+
+function getParcelCommandNumber(parcel) {
+  return reconcileCommandNumber(parcel?.commandNumber || "", parcel?.barcode || "");
 }
 
 function normalizeDeliveryNote(note) {
@@ -2466,10 +2539,11 @@ function normalizeDeliveryNoteAnalysis(analysis) {
     totalExpectedCount: Number(analysis.totalExpectedCount || 0),
     totalRegisteredCount: Number(analysis.totalRegisteredCount || 0),
     totalMissingCount: Number(analysis.totalMissingCount || 0),
+    incomparableParcelsCount: Number(analysis.incomparableParcelsCount || 0),
     parseError: normalizeFreeText(analysis.parseError || ""),
     missingEntries: analysis.missingEntries
       .map((entry) => ({
-        commandNumber: normalizeBarcode(entry.commandNumber || ""),
+        commandNumber: normalizeCommandNumber(entry.commandNumber || ""),
         expectedCount: Number(entry.expectedCount || 1),
         registeredCount: Number(entry.registeredCount || 0),
         missingCount: Number(entry.missingCount || 0),
@@ -3360,31 +3434,50 @@ function scoreDeliveryEntryCandidate(entry) {
 function buildRegisteredCommandSet() {
   return new Set(
     state.parcels
-      .map((parcel) => normalizeBarcode(parcel.barcode || ""))
-      .filter((barcode) => /^\d{5,10}$/.test(barcode)),
+      .map((parcel) => getParcelCommandNumber(parcel))
+      .filter(Boolean),
   );
 }
 
 function buildRegisteredCommandCounts() {
-  return state.parcels.reduce((map, parcel) => {
-    const barcode = normalizeBarcode(parcel.barcode || "");
-    if (!/^\d{5,10}$/.test(barcode)) {
+  const groupedCounts = state.parcels.reduce((map, parcel) => {
+    const commandNumber = getParcelCommandNumber(parcel);
+    if (!commandNumber) {
       return map;
     }
 
-    map.set(barcode, (map.get(barcode) || 0) + 1);
+    const bucket = map.get(commandNumber) || {
+      packageIndexes: new Set(),
+      unlabeledCount: 0,
+    };
+    const packageIndex = normalizeFreeText(parcel.packageIndex || "");
+
+    if (packageIndex) {
+      bucket.packageIndexes.add(packageIndex);
+    } else {
+      bucket.unlabeledCount += 1;
+    }
+
+    map.set(commandNumber, bucket);
     return map;
   }, new Map());
+
+  return new Map(
+    [...groupedCounts.entries()].map(([commandNumber, bucket]) => [
+      commandNumber,
+      bucket.packageIndexes.size + bucket.unlabeledCount,
+    ]),
+  );
 }
 
 function buildRegisteredCommandInfo() {
   const groupedInfo = state.parcels.reduce((map, parcel) => {
-    const barcode = normalizeBarcode(parcel.barcode || "");
-    if (!/^\d{5,10}$/.test(barcode)) {
+    const commandNumber = getParcelCommandNumber(parcel);
+    if (!commandNumber) {
       return map;
     }
 
-    const nextBucket = map.get(barcode) || {
+    const nextBucket = map.get(commandNumber) || {
       clients: new Map(),
       cities: new Map(),
     };
@@ -3399,19 +3492,23 @@ function buildRegisteredCommandInfo() {
       nextBucket.cities.set(city, (nextBucket.cities.get(city) || 0) + 1);
     }
 
-    map.set(barcode, nextBucket);
+    map.set(commandNumber, nextBucket);
     return map;
   }, new Map());
 
   return new Map(
-    [...groupedInfo.entries()].map(([barcode, bucket]) => [
-      barcode,
+    [...groupedInfo.entries()].map(([commandNumber, bucket]) => [
+      commandNumber,
       {
         client: getMostCommonDeliveryValue(bucket.clients),
         city: getMostCommonDeliveryValue(bucket.cities),
       },
     ]),
   );
+}
+
+function countIncomparableParcels() {
+  return state.parcels.filter((parcel) => !getParcelCommandNumber(parcel)).length;
 }
 
 function getMostCommonDeliveryValue(counts) {

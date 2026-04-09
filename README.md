@@ -12,6 +12,7 @@ Le site permet de scanner un code-barres ou une etiquette complete, de ranger ch
 - remplissage automatique des informations du colis
 - gestion d'une destination complete, pas seulement du departement
 - prise en compte optionnelle du numero destination de type `R447500`
+- comparaison d'un bon de livraison PDF avec les colis enregistres
 - recherche par code-barres, numero destination, destination, client, reference ou route
 - deplacement d'un colis d'une baque a une autre
 - suppression d'un colis
@@ -22,6 +23,7 @@ Le site permet de scanner un code-barres ou une etiquette complete, de ranger ch
 Le formulaire peut enregistrer :
 
 - code-barres / numero de commande
+- numero de commande exploitable pour la comparaison PDF
 - numero destination
 - destination complete
 - client
@@ -40,6 +42,11 @@ Le formulaire peut enregistrer :
 3. Verifier les informations remplies automatiquement.
 4. Corriger si besoin, puis enregistrer le colis.
 5. Utiliser la recherche ou le deplacement entre baques si le colis change d'emplacement.
+
+Important :
+
+- le `numero destination` suffit pour enregistrer un colis
+- pour la comparaison avec un bon de livraison PDF, il faut aussi que le `numero de commande` soit reconnu ou saisi
 
 ## Lancer le site en local
 
@@ -85,6 +92,7 @@ Important :
 - les donnees sont stockees localement dans le navigateur, elles ne sont pas partagees entre plusieurs telephones ou ordinateurs
 - la qualite de l'OCR depend fortement de la nettete, de la lumiere et du cadrage de la photo
 - certaines etiquettes peuvent necessiter une verification manuelle apres lecture automatique
+- un colis enregistre sans numero de commande reste visible dans le site, mais il ne peut pas etre compare automatiquement avec un bon de livraison PDF
 
 ## Structure du projet
 
