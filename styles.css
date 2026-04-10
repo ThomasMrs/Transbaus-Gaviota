@@ -433,6 +433,40 @@ code {
   gap: 16px;
 }
 
+.destination-rules,
+.destination-rules__list {
+  display: grid;
+  gap: 16px;
+}
+
+.destination-rules__form,
+.destination-rule-card {
+  padding: 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(36, 78, 115, 0.08);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.destination-rule-card {
+  display: grid;
+  gap: 14px;
+}
+
+.destination-rule-card__top,
+.destination-card__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.destination-rule-card__matches,
+.destination-card__aliases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -697,11 +731,33 @@ code {
     linear-gradient(140deg, rgba(154, 200, 235, 0.18), rgba(241, 179, 157, 0.1));
 }
 
+.destination-card--rule {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 252, 248, 0.94)),
+    linear-gradient(145deg, rgba(220, 239, 230, 0.42), rgba(154, 200, 235, 0.12));
+}
+
 .destination-count {
   margin-top: 10px;
   font-size: 2rem;
   line-height: 1;
   font-family: "Space Grotesk", sans-serif;
+}
+
+.destination-card__title-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.destination-card__action {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.destination-card__aliases {
+  margin-top: 14px;
 }
 
 .distribution-list {
@@ -1097,6 +1153,8 @@ code {
   .section-head,
   .section-head__actions,
   .hero__side-head,
+  .destination-card__top,
+  .destination-rule-card__top,
   .baque-card__meta,
   .parcel-item__top,
   .parcel-item__bottom,

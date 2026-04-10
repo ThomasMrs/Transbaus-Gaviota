@@ -98,6 +98,11 @@ function cacheElements() {
   ui.deliveryNoteInput = document.querySelector("#deliveryNoteInput");
   ui.deliveryNoteStatus = document.querySelector("#deliveryNoteStatus");
   ui.deliveryNoteList = document.querySelector("#deliveryNoteList");
+  ui.destinationRuleForm = document.querySelector("#destinationRuleForm");
+  ui.destinationRuleLabelInput = document.querySelector("#destinationRuleLabelInput");
+  ui.destinationRuleMatchModeSelect = document.querySelector("#destinationRuleMatchModeSelect");
+  ui.destinationRulePatternsInput = document.querySelector("#destinationRulePatternsInput");
+  ui.destinationRulesList = document.querySelector("#destinationRulesList");
   ui.destinationSummary = document.querySelector("#destinationSummary");
   ui.baquesGrid = document.querySelector("#baquesGrid");
   ui.scannerModal = document.querySelector("#scannerModal");
@@ -130,6 +135,10 @@ function bindEvents() {
   ui.deliveryNoteList.addEventListener("click", (event) => {
     void handleDeliveryNoteListClick(event);
   });
+  ui.destinationRuleForm.addEventListener("submit", handleDestinationRuleSubmit);
+  ui.destinationRulesList.addEventListener("click", handleDestinationRulesClick);
+  ui.destinationRulesList.addEventListener("change", handleDestinationRulesChange);
+  ui.destinationSummary.addEventListener("click", handleDestinationSummaryClick);
   ui.openScannerBtn.addEventListener("click", openScanner);
   ui.importBarcodeBtn.addEventListener("click", openBarcodeCameraPicker);
   ui.chooseBarcodeBtn.addEventListener("click", openBarcodeLibraryPicker);
@@ -383,11 +392,17 @@ function loadState() {
         .map((note) => normalizeDeliveryNote(note))
         .filter(Boolean)
       : [];
+    const destinationRules = Array.isArray(parsed.destinationRules)
+      ? parsed.destinationRules
+        .map((rule) => normalizeDestinationRule(rule))
+        .filter(Boolean)
+      : [];
 
     return {
       baques: baques.length ? baques : createDefaultState().baques,
       parcels,
       deliveryNotes,
+      destinationRules,
     };
   } catch (error) {
     return createDefaultState();
@@ -404,6 +419,7 @@ function createDefaultState() {
     })),
     parcels: [],
     deliveryNotes: [],
+    destinationRules: [],
   };
 }
 
@@ -434,6 +450,7 @@ function saveState() {
 function render() {
   renderHeroStats();
   renderBaqueSelect();
+  renderDestinationRules();
   renderDestinationSummary();
   renderBaques();
   renderSearchResults();
@@ -444,11 +461,7 @@ function render() {
 function renderHeroStats() {
   const totalBaques = state.baques.length;
   const totalParcels = state.parcels.length;
-  const totalDestinations = new Set(
-    state.parcels
-      .map((parcel) => getParcelDestinationKey(parcel))
-      .filter(Boolean),
-  ).size;
+  const totalDestinations = getDestinationGroups().length;
 
   ui.heroStats.innerHTML = [
     statCard(totalBaques, "Baques actives"),
@@ -485,7 +498,9 @@ function renderBaqueSelect() {
 }
 
 function renderDestinationSummary() {
-  if (!state.parcels.length) {
+  const destinationGroups = getDestinationGroups();
+
+  if (!destinationGroups.length) {
     ui.destinationSummary.innerHTML = `
       <article class="empty-card">
         <p class="empty-state">Aucun colis pour le moment. La vue par destination apparaitra ici.</p>
@@ -494,44 +509,135 @@ function renderDestinationSummary() {
     return;
   }
 
-  const grouped = state.parcels.reduce((map, parcel) => {
-    const key = getParcelDestinationKey(parcel);
-    if (!key) {
-      return map;
-    }
-    if (!map.has(key)) {
-      map.set(key, []);
-    }
-    map.get(key).push(parcel);
-    return map;
-  }, new Map());
-
-  ui.destinationSummary.innerHTML = [...grouped.entries()]
-    .sort(([a], [b]) => a.localeCompare(b, "fr", { numeric: true }))
-    .map(([destination, parcels]) => {
-      const distribution = parcels.reduce((acc, parcel) => {
-        const baqueName = getBaqueById(parcel.currentBaqueId)?.name || "Baque supprimee";
-        acc[baqueName] = (acc[baqueName] || 0) + 1;
-        return acc;
-      }, {});
-
-      const chips = Object.entries(distribution)
+  ui.destinationSummary.innerHTML = destinationGroups
+    .map((group) => {
+      const chips = group.distribution
         .map(
           ([baqueName, count]) => `
             <span class="distribution-chip">${escapeHtml(baqueName)} : ${escapeHtml(String(count))}</span>
           `,
         )
         .join("");
+      const destinations = group.rule && group.destinations.length
+        ? `
+          <div class="destination-card__aliases">
+            ${group.destinations
+              .map(
+                ([destination, count]) => `
+                  <span class="tag">${escapeHtml(destination)}${count > 1 ? ` x${escapeHtml(String(count))}` : ""}</span>
+                `,
+              )
+              .join("")}
+          </div>
+        `
+        : "";
+      const quickAction = group.rule
+        ? ""
+        : `
+          <button
+            class="btn btn--secondary destination-card__action"
+            type="button"
+            data-action="prefill-destination-rule"
+            data-label="${escapeAttribute(group.label)}"
+          >
+            Creer une regle
+          </button>
+        `;
 
       return `
-        <article class="destination-card">
-          <h3>${escapeHtml(destination)}</h3>
-          <div class="destination-count">${escapeHtml(String(parcels.length))}</div>
-          <div class="destination-card__meta">
-            <span>${escapeHtml(pluralize(parcels.length, "colis", "colis"))}</span>
-            ${renderRouteCodeMeta(parcels)}
+        <article class="destination-card${group.rule ? " destination-card--rule" : ""}">
+          <div class="destination-card__top">
+            <div class="destination-card__title-block">
+              <h3>${escapeHtml(group.label)}</h3>
+              ${group.rule ? `<span class="tag">Regle</span>` : ""}
+            </div>
+            ${quickAction}
           </div>
+          <div class="destination-count">${escapeHtml(String(group.parcels.length))}</div>
+          <div class="destination-card__meta">
+            <span>${escapeHtml(String(group.parcels.length))} colis</span>
+            ${renderRouteCodeMeta(group.parcels)}
+            ${group.rule ? `<span><strong>Condition :</strong> ${escapeHtml(getDestinationRuleMatchModeLabel(group.rule.matchMode))}</span>` : ""}
+          </div>
+          ${destinations}
           <div class="distribution-list">${chips}</div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderDestinationRules() {
+  if (!state.destinationRules.length) {
+    ui.destinationRulesList.innerHTML = `
+      <article class="empty-card">
+        <p class="empty-state">Aucune regle pour le moment. Ajoutez-en une pour regrouper des destinations proches.</p>
+      </article>
+    `;
+    return;
+  }
+
+  ui.destinationRulesList.innerHTML = getSortedDestinationRules()
+    .map((rule) => {
+      const matchedDestinations = getRuleMatchedDestinationLabels(rule);
+      const matchedParcelsCount = countRuleMatchedParcels(rule);
+      const previewTags = matchedDestinations.length
+        ? matchedDestinations
+          .slice(0, 4)
+          .map(
+            (destination) => `
+              <span class="tag">${escapeHtml(destination)}</span>
+            `,
+          )
+          .join("")
+        : `<span class="tag">Aucun colis correspondant</span>`;
+      const extraCount = matchedDestinations.length > 4
+        ? `<span class="tag">+${escapeHtml(String(matchedDestinations.length - 4))}</span>`
+        : "";
+
+      return `
+        <article class="destination-rule-card" data-rule-id="${escapeHtml(rule.id)}">
+          <div class="destination-rule-card__top">
+            <span class="count-pill">${escapeHtml(String(matchedParcelsCount))} colis</span>
+            <button class="btn btn--danger" type="button" data-action="delete-destination-rule" data-rule-id="${escapeHtml(rule.id)}">
+              Supprimer
+            </button>
+          </div>
+          <div class="field-grid destination-rule-card__grid">
+            <label class="field">
+              <span>Nom du groupe</span>
+              <input
+                type="text"
+                value="${escapeAttribute(rule.label)}"
+                data-field="label"
+                data-rule-id="${escapeHtml(rule.id)}"
+                aria-label="Nom du groupe"
+              >
+            </label>
+
+            <label class="field">
+              <span>Condition</span>
+              <select data-field="matchMode" data-rule-id="${escapeHtml(rule.id)}" aria-label="Condition de regroupement">
+                <option value="any" ${rule.matchMode === "any" ? "selected" : ""}>Au moins un mot-cle</option>
+                <option value="all" ${rule.matchMode === "all" ? "selected" : ""}>Tous les mots-cles</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="field">
+            <span>Mots-cles adresse</span>
+            <textarea
+              rows="3"
+              data-field="patterns"
+              data-rule-id="${escapeHtml(rule.id)}"
+              aria-label="Mots-cles adresse"
+            >${escapeHtml(rule.patterns.join("\n"))}</textarea>
+          </label>
+
+          <div class="destination-rule-card__matches">
+            ${previewTags}
+            ${extraCount}
+          </div>
         </article>
       `;
     })
@@ -846,6 +952,108 @@ function handleBaqueSubmit(event) {
   render();
   ui.baqueForm.reset();
   showToast(`La baque "${name}" a ete ajoutee.`);
+}
+
+function handleDestinationRuleSubmit(event) {
+  event.preventDefault();
+
+  const label = normalizeFreeText(ui.destinationRuleLabelInput.value);
+  const matchMode = normalizeDestinationRuleMatchMode(ui.destinationRuleMatchModeSelect.value);
+  const patterns = parseDestinationRulePatterns(ui.destinationRulePatternsInput.value);
+
+  if (!label || !patterns.length) {
+    showToast("Le nom du groupe et au moins un mot-cle sont obligatoires.", "danger");
+    return;
+  }
+
+  state.destinationRules.push({
+    id: createId(),
+    label,
+    matchMode,
+    patterns,
+    createdAt: new Date().toISOString(),
+  });
+
+  saveState();
+  render();
+  ui.destinationRuleForm.reset();
+  ui.destinationRuleMatchModeSelect.value = "any";
+  showToast(`Regle "${label}" ajoutee.`);
+}
+
+function handleDestinationSummaryClick(event) {
+  const button = event.target.closest('[data-action="prefill-destination-rule"]');
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  const label = normalizeFreeText(button.dataset.label || "");
+  if (!label) {
+    return;
+  }
+
+  ui.destinationRuleLabelInput.value = label;
+  ui.destinationRulePatternsInput.value = label;
+  ui.destinationRuleMatchModeSelect.value = "any";
+  ui.destinationRuleLabelInput.focus();
+  showToast("Regle pre-remplie. Ajustez-la puis enregistrez.");
+}
+
+function handleDestinationRulesClick(event) {
+  const button = event.target.closest('[data-action="delete-destination-rule"]');
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  const ruleId = button.dataset.ruleId;
+  if (!ruleId) {
+    return;
+  }
+
+  deleteDestinationRule(ruleId);
+}
+
+function handleDestinationRulesChange(event) {
+  const input = event.target;
+  const field = input.dataset.field;
+  const ruleId = input.dataset.ruleId;
+
+  if (!field || !ruleId) {
+    return;
+  }
+
+  const rule = getDestinationRuleById(ruleId);
+  if (!rule) {
+    return;
+  }
+
+  if (field === "label") {
+    const nextLabel = normalizeFreeText(input.value);
+    if (!nextLabel) {
+      render();
+      showToast("Le nom du groupe ne peut pas etre vide.", "danger");
+      return;
+    }
+    rule.label = nextLabel;
+  }
+
+  if (field === "matchMode") {
+    rule.matchMode = normalizeDestinationRuleMatchMode(input.value);
+  }
+
+  if (field === "patterns") {
+    const nextPatterns = parseDestinationRulePatterns(input.value);
+    if (!nextPatterns.length) {
+      render();
+      showToast("Ajoutez au moins un mot-cle adresse.", "danger");
+      return;
+    }
+    rule.patterns = nextPatterns;
+  }
+
+  saveState();
+  render();
+  showToast("Regle mise a jour.");
 }
 
 function handleBaqueGridClick(event) {
@@ -2091,6 +2299,22 @@ function deleteBaque(baqueId) {
   showToast("Baque supprimee.");
 }
 
+function deleteDestinationRule(ruleId) {
+  const rule = getDestinationRuleById(ruleId);
+  if (!rule) {
+    return;
+  }
+
+  if (!window.confirm(`Supprimer la regle "${rule.label}" ?`)) {
+    return;
+  }
+
+  state.destinationRules = state.destinationRules.filter((item) => item.id !== ruleId);
+  saveState();
+  render();
+  showToast(`Regle "${rule.label}" supprimee.`);
+}
+
 function deleteParcel(parcelId) {
   const parcel = state.parcels.find((item) => item.id === parcelId);
   if (!parcel) {
@@ -2256,8 +2480,118 @@ function getBaqueById(baqueId) {
   return state.baques.find((baque) => baque.id === baqueId) || null;
 }
 
+function getDestinationRuleById(ruleId) {
+  return state.destinationRules.find((rule) => rule.id === ruleId) || null;
+}
+
 function getOriginLabel(parcel) {
   return getBaqueById(parcel.originBaqueId)?.name || parcel.originBaqueLabel || "Baque supprimee";
+}
+
+function getDestinationGroups() {
+  const grouped = state.parcels.reduce((map, parcel) => {
+    const group = resolveDestinationGroup(parcel);
+    if (!group.key) {
+      return map;
+    }
+
+    if (!map.has(group.key)) {
+      map.set(group.key, {
+        key: group.key,
+        label: group.label,
+        rule: group.rule,
+        parcels: [],
+        destinations: new Map(),
+      });
+    }
+
+    const bucket = map.get(group.key);
+    const destinationLabel = getParcelDestinationDisplay(parcel);
+    bucket.parcels.push(parcel);
+    bucket.destinations.set(destinationLabel, (bucket.destinations.get(destinationLabel) || 0) + 1);
+    return map;
+  }, new Map());
+
+  return [...grouped.values()]
+    .map((bucket) => ({
+      ...bucket,
+      distribution: getDestinationGroupDistribution(bucket.parcels),
+      destinations: [...bucket.destinations.entries()]
+        .sort(([left], [right]) => left.localeCompare(right, "fr", { numeric: true, sensitivity: "base" })),
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label, "fr", { numeric: true, sensitivity: "base" }));
+}
+
+function resolveDestinationGroup(parcel) {
+  const label = getParcelDestinationDisplay(parcel);
+  const rule = findMatchingDestinationRule(label);
+
+  if (rule) {
+    return {
+      key: `rule:${rule.id}`,
+      label: rule.label,
+      rule,
+    };
+  }
+
+  return {
+    key: `destination:${getParcelDestinationKey(parcel)}`,
+    label,
+    rule: null,
+  };
+}
+
+function getDestinationGroupDistribution(parcels) {
+  return Object.entries(
+    parcels.reduce((acc, parcel) => {
+      const baqueName = getBaqueById(parcel.currentBaqueId)?.name || "Baque supprimee";
+      acc[baqueName] = (acc[baqueName] || 0) + 1;
+      return acc;
+    }, {}),
+  ).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "fr", { sensitivity: "base" }));
+}
+
+function findMatchingDestinationRule(destination) {
+  const searchText = normalizeDestinationRuleText(destination);
+  if (!searchText) {
+    return null;
+  }
+
+  return getSortedDestinationRules().find((rule) => doesDestinationRuleMatch(rule, searchText)) || null;
+}
+
+function getSortedDestinationRules() {
+  return [...state.destinationRules].sort((left, right) => {
+    const scoreDifference = getDestinationRuleSpecificity(right) - getDestinationRuleSpecificity(left);
+    if (scoreDifference !== 0) {
+      return scoreDifference;
+    }
+
+    return left.label.localeCompare(right.label, "fr", { sensitivity: "base" });
+  });
+}
+
+function getDestinationRuleSpecificity(rule) {
+  return (rule.patterns.length * 1000) + rule.patterns.join("").length;
+}
+
+function doesDestinationRuleMatch(rule, searchText) {
+  const matches = rule.patterns.map((pattern) => searchText.includes(pattern));
+  return rule.matchMode === "all" ? matches.every(Boolean) : matches.some(Boolean);
+}
+
+function countRuleMatchedParcels(rule) {
+  return state.parcels.filter(
+    (parcel) => findMatchingDestinationRule(getParcelDestinationDisplay(parcel))?.id === rule.id,
+  ).length;
+}
+
+function getRuleMatchedDestinationLabels(rule) {
+  return [...new Set(
+    state.parcels
+      .map((parcel) => getParcelDestinationDisplay(parcel))
+      .filter((destination) => findMatchingDestinationRule(destination)?.id === rule.id),
+  )].sort((left, right) => left.localeCompare(right, "fr", { numeric: true, sensitivity: "base" }));
 }
 
 function createId() {
@@ -2278,6 +2612,52 @@ function normalizeRouteCode(value) {
 
 function normalizeFreeText(value) {
   return value.trim().replace(/\s+/g, " ");
+}
+
+function normalizeDestinationRule(rule) {
+  if (!rule) {
+    return null;
+  }
+
+  const label = normalizeFreeText(String(rule.label || ""));
+  const patterns = parseDestinationRulePatterns(rule.patterns || "");
+  if (!label || !patterns.length) {
+    return null;
+  }
+
+  return {
+    id: String(rule.id || createId()),
+    label,
+    matchMode: normalizeDestinationRuleMatchMode(rule.matchMode),
+    patterns,
+    createdAt: rule.createdAt || new Date().toISOString(),
+  };
+}
+
+function normalizeDestinationRuleMatchMode(value) {
+  return value === "all" ? "all" : "any";
+}
+
+function parseDestinationRulePatterns(value) {
+  const rawValues = Array.isArray(value)
+    ? value
+    : String(value || "")
+      .replaceAll(",", "\n")
+      .split("\n");
+
+  return [...new Set(rawValues.map((entry) => normalizeDestinationRuleText(entry)).filter(Boolean))];
+}
+
+function normalizeDestinationRuleText(value) {
+  return stripDiacritics(sanitizeDestination(String(value || "")).toUpperCase())
+    .replace(/[^0-9A-Z\s-]/g, " ")
+    .replace(/[-/]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripDiacritics(value) {
+  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
 function normalizeParcelData(parcel) {
@@ -2314,6 +2694,10 @@ function getParcelDestinationDisplay(parcel) {
 
 function getParcelDestinationKey(parcel) {
   return getParcelDestinationDisplay(parcel).toUpperCase();
+}
+
+function getDestinationRuleMatchModeLabel(matchMode) {
+  return matchMode === "all" ? "Tous les mots-cles" : "Au moins un mot-cle";
 }
 
 function getParcelIdentifier(parcel) {

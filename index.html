@@ -479,8 +479,52 @@
 
         <div id="destinationsSectionBody" class="collapsible-body">
           <p class="section-caption">
-            Chaque carte indique dans quelles baques se trouvent les colis.
+            Creez des regles pour regrouper les colis qui peuvent aller ensemble selon l'adresse.
           </p>
+          <div class="destination-rules">
+            <form id="destinationRuleForm" class="form-stack destination-rules__form">
+              <div class="field-grid destination-rules__grid">
+                <label class="field">
+                  <span>Nom du groupe</span>
+                  <input
+                    id="destinationRuleLabelInput"
+                    type="text"
+                    maxlength="120"
+                    placeholder="Exemple : Tournee Fumel"
+                  >
+                </label>
+
+                <label class="field">
+                  <span>Condition</span>
+                  <select id="destinationRuleMatchModeSelect">
+                    <option value="any">Au moins un mot-cle</option>
+                    <option value="all">Tous les mots-cles</option>
+                  </select>
+                </label>
+              </div>
+
+              <label class="field">
+                <span>Mots-cles adresse</span>
+                <textarea
+                  id="destinationRulePatternsInput"
+                  rows="3"
+                  placeholder="Exemple : 47500&#10;SAINT-VITE&#10;FUMEL"
+                ></textarea>
+              </label>
+
+              <div class="actions">
+                <button class="btn btn--primary" type="submit">
+                  Ajouter la regle
+                </button>
+              </div>
+
+              <p class="field-help">
+                Une regle s'applique si la destination contient un ou plusieurs mots-cles de l'adresse.
+              </p>
+            </form>
+
+            <div id="destinationRulesList" class="destination-rules__list"></div>
+          </div>
           <div id="destinationSummary" class="destination-grid"></div>
         </div>
       </section>
