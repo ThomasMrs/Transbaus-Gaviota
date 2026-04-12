@@ -43,6 +43,12 @@ const captureSession = {
   stream: null,
   mode: "label",
   busy: false,
+  autoCaptureTimer: 0,
+  lastFrameSignature: null,
+  stableFrameCount: 0,
+  autoTriggered: false,
+  analysisCanvas: null,
+  analysisContext: null,
 };
 const deliveryNoteAnalysis = {
   busy: false,
@@ -2046,9 +2052,9 @@ function configureCaptureModal(mode) {
 
   ui.captureTitle.textContent = isLabelMode ? "Cadrer l'etiquette" : "Cadrer le code-barres";
   ui.captureHint.textContent = isLabelMode
-    ? "Placez l'etiquette entiere dans le cadre, bien droite et nette, puis prenez la photo."
+    ? "Placez l'etiquette entiere dans le cadre. La photo se prend automatiquement quand elle est stable."
     : "Placez le code-barres au centre du cadre, evitez les reflets, puis prenez la photo.";
-  ui.takeCaptureBtn.textContent = "Prendre la photo";
+  ui.takeCaptureBtn.textContent = isLabelMode ? "Prendre maintenant" : "Prendre la photo";
   ui.captureGuide.classList.toggle("capture-guide--label", isLabelMode);
   ui.captureGuide.classList.toggle("capture-guide--barcode", !isLabelMode);
 }
@@ -2070,6 +2076,9 @@ async function startCaptureStream() {
 
   await ui.captureVideo.play();
   ui.takeCaptureBtn.disabled = false;
+  if (captureSession.mode === "label") {
+    startAutoCaptureMonitoring();
+  }
 }
 
 async function closeCaptureModal(options = {}) {
@@ -2087,6 +2096,8 @@ async function closeCaptureModal(options = {}) {
 }
 
 async function stopCaptureStream() {
+  stopAutoCaptureMonitoring();
+
   if (captureSession.stream) {
     captureSession.stream.getTracks().forEach((track) => track.stop());
     captureSession.stream = null;
@@ -2098,15 +2109,18 @@ async function stopCaptureStream() {
   }
 }
 
-async function handleCapturePhoto() {
+async function handleCapturePhoto(options = {}) {
   if (captureSession.busy || !ui.captureVideo.videoWidth || !ui.captureVideo.videoHeight) {
     return;
   }
 
   captureSession.busy = true;
+  stopAutoCaptureMonitoring();
   ui.takeCaptureBtn.disabled = true;
-  ui.takeCaptureBtn.textContent = "Preparation...";
-  ui.captureStatus.textContent = "Photo prise. Preparation de l'image...";
+  ui.takeCaptureBtn.textContent = options.auto ? "Capture auto..." : "Preparation...";
+  ui.captureStatus.textContent = options.auto
+    ? "Etiquette stable detectee. Preparation de l'image..."
+    : "Photo prise. Preparation de l'image...";
 
   const mode = captureSession.mode;
 
@@ -2125,8 +2139,209 @@ async function handleCapturePhoto() {
   } finally {
     captureSession.busy = false;
     ui.takeCaptureBtn.disabled = false;
-    ui.takeCaptureBtn.textContent = "Prendre la photo";
+    ui.takeCaptureBtn.textContent = mode === "label" ? "Prendre maintenant" : "Prendre la photo";
   }
+}
+
+function startAutoCaptureMonitoring() {
+  stopAutoCaptureMonitoring();
+
+  captureSession.autoTriggered = false;
+  captureSession.stableFrameCount = 0;
+  captureSession.lastFrameSignature = null;
+  ui.captureStatus.textContent = "Auto actif. Placez l'etiquette dans le cadre et gardez le telephone stable.";
+
+  captureSession.autoCaptureTimer = window.setInterval(() => {
+    if (captureSession.mode !== "label" || captureSession.busy || captureSession.autoTriggered) {
+      return;
+    }
+
+    if (!ui.captureVideo.videoWidth || !ui.captureVideo.videoHeight || ui.captureVideo.readyState < 2) {
+      return;
+    }
+
+    const analysis = analyzeCurrentCaptureFrame();
+    if (!analysis) {
+      return;
+    }
+
+    captureSession.lastFrameSignature = analysis.signature;
+
+    if (!analysis.isReady) {
+      captureSession.stableFrameCount = 0;
+      ui.captureStatus.textContent = analysis.message;
+      return;
+    }
+
+    captureSession.stableFrameCount += 1;
+
+    if (captureSession.stableFrameCount < 3) {
+      ui.captureStatus.textContent = "Etiquette detectee. Restez immobile une seconde...";
+      return;
+    }
+
+    captureSession.autoTriggered = true;
+    ui.captureStatus.textContent = "Etiquette stable detectee. Photo automatique...";
+    void handleCapturePhoto({ auto: true });
+  }, 420);
+}
+
+function stopAutoCaptureMonitoring() {
+  if (captureSession.autoCaptureTimer) {
+    window.clearInterval(captureSession.autoCaptureTimer);
+    captureSession.autoCaptureTimer = 0;
+  }
+
+  captureSession.lastFrameSignature = null;
+  captureSession.stableFrameCount = 0;
+  captureSession.autoTriggered = false;
+}
+
+function analyzeCurrentCaptureFrame() {
+  const crop = getCaptureCropArea("label");
+  if (!crop.width || !crop.height) {
+    return null;
+  }
+
+  const sampleWidth = 108;
+  const sampleHeight = Math.max(68, Math.round(sampleWidth * (crop.height / crop.width)));
+  const { context } = getCaptureAnalysisContext(sampleWidth, sampleHeight);
+  context.drawImage(
+    ui.captureVideo,
+    crop.x,
+    crop.y,
+    crop.width,
+    crop.height,
+    0,
+    0,
+    sampleWidth,
+    sampleHeight,
+  );
+
+  const imageData = context.getImageData(0, 0, sampleWidth, sampleHeight);
+  const signature = new Uint8Array(sampleWidth * sampleHeight);
+  const totalPixels = sampleWidth * sampleHeight;
+  let whitePixels = 0;
+  let centerWhitePixels = 0;
+  let centerPixelCount = 0;
+  let luminanceSum = 0;
+  let luminanceSquaredSum = 0;
+  let edgePixels = 0;
+
+  for (let y = 0; y < sampleHeight; y += 1) {
+    for (let x = 0; x < sampleWidth; x += 1) {
+      const pixelIndex = (y * sampleWidth + x);
+      const offset = pixelIndex * 4;
+      const red = imageData.data[offset];
+      const green = imageData.data[offset + 1];
+      const blue = imageData.data[offset + 2];
+      const luminance = Math.round((red * 0.299) + (green * 0.587) + (blue * 0.114));
+      const colorSpread = Math.max(red, green, blue) - Math.min(red, green, blue);
+      const isWhiteLabelPixel = luminance >= 168 && colorSpread <= 78;
+
+      signature[pixelIndex] = luminance;
+      luminanceSum += luminance;
+      luminanceSquaredSum += luminance * luminance;
+
+      if (isWhiteLabelPixel) {
+        whitePixels += 1;
+      }
+
+      if (
+        x >= Math.round(sampleWidth * 0.2)
+        && x <= Math.round(sampleWidth * 0.8)
+        && y >= Math.round(sampleHeight * 0.2)
+        && y <= Math.round(sampleHeight * 0.8)
+      ) {
+        centerPixelCount += 1;
+        if (isWhiteLabelPixel) {
+          centerWhitePixels += 1;
+        }
+      }
+
+      if (x > 0 && y > 0) {
+        const leftLuminance = signature[pixelIndex - 1];
+        const topLuminance = signature[pixelIndex - sampleWidth];
+        if (Math.abs(luminance - leftLuminance) + Math.abs(luminance - topLuminance) >= 54) {
+          edgePixels += 1;
+        }
+      }
+    }
+  }
+
+  const averageLuminance = luminanceSum / totalPixels;
+  const variance = Math.max(0, (luminanceSquaredSum / totalPixels) - (averageLuminance * averageLuminance));
+  const contrast = Math.sqrt(variance);
+  const whiteRatio = whitePixels / totalPixels;
+  const centerWhiteRatio = centerPixelCount ? centerWhitePixels / centerPixelCount : 0;
+  const edgeRatio = edgePixels / totalPixels;
+  const motion = getCaptureFrameMotion(signature, captureSession.lastFrameSignature);
+  const isStable = motion !== null && motion <= 11;
+  const isReady = whiteRatio >= 0.34 && centerWhiteRatio >= 0.52 && contrast >= 34 && edgeRatio >= 0.06 && isStable;
+
+  return {
+    signature,
+    isReady,
+    message: buildAutoCaptureStatusMessage({
+      whiteRatio,
+      centerWhiteRatio,
+      contrast,
+      edgeRatio,
+      motion,
+    }),
+  };
+}
+
+function getCaptureAnalysisContext(width, height) {
+  if (!captureSession.analysisCanvas) {
+    captureSession.analysisCanvas = document.createElement("canvas");
+    captureSession.analysisContext = captureSession.analysisCanvas.getContext("2d", { willReadFrequently: true });
+  }
+
+  if (!captureSession.analysisContext) {
+    throw new Error("capture-analysis-context-unavailable");
+  }
+
+  if (captureSession.analysisCanvas.width !== width || captureSession.analysisCanvas.height !== height) {
+    captureSession.analysisCanvas.width = width;
+    captureSession.analysisCanvas.height = height;
+  }
+
+  return {
+    canvas: captureSession.analysisCanvas,
+    context: captureSession.analysisContext,
+  };
+}
+
+function getCaptureFrameMotion(currentSignature, previousSignature) {
+  if (!(previousSignature instanceof Uint8Array) || previousSignature.length !== currentSignature.length) {
+    return null;
+  }
+
+  let totalDelta = 0;
+  let comparedPixels = 0;
+  for (let index = 0; index < currentSignature.length; index += 3) {
+    totalDelta += Math.abs(currentSignature[index] - previousSignature[index]);
+    comparedPixels += 1;
+  }
+
+  return comparedPixels ? totalDelta / comparedPixels : null;
+}
+
+function buildAutoCaptureStatusMessage(metrics) {
+  if (metrics.motion === null || metrics.motion > 11) {
+    return "Auto actif. Restez immobile et gardez l'etiquette bien droite dans le cadre.";
+  }
+
+  if (metrics.centerWhiteRatio < 0.52 || metrics.whiteRatio < 0.34) {
+    return "Auto actif. Rapprochez ou recentrez l'etiquette pour qu'elle remplisse mieux le cadre.";
+  }
+
+  if (metrics.contrast < 34 || metrics.edgeRatio < 0.06) {
+    return "Auto actif. Evitez le flou et les reflets sur l'etiquette.";
+  }
+
+  return "Etiquette detectee. Restez immobile...";
 }
 
 async function captureCurrentFrame(mode) {

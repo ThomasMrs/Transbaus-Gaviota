@@ -1098,6 +1098,11 @@ code {
 
 .modal__dialog--capture {
   width: min(840px, 100%);
+  max-height: min(92dvh, 920px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
 }
 
 .capture-preview {
@@ -1108,6 +1113,8 @@ code {
   background:
     linear-gradient(180deg, rgba(17, 28, 40, 0.92), rgba(26, 39, 53, 0.94));
   aspect-ratio: 4 / 3;
+  max-height: min(54dvh, 520px);
+  flex-shrink: 0;
 }
 
 .capture-video {
@@ -1126,7 +1133,7 @@ code {
 }
 
 .capture-guide--label {
-  inset: 12% 6% 18%;
+  inset: 10% 6% 14%;
 }
 
 .capture-guide--barcode {
@@ -1138,10 +1145,15 @@ code {
   display: flex;
   gap: 12px;
   margin-top: 12px;
+  position: sticky;
+  bottom: calc(-1 * 24px);
+  padding: 12px 0 calc(8px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.96) 22%, rgba(255, 255, 255, 0.98));
 }
 
 .capture-modal__actions .btn {
   width: 100%;
+  min-height: 56px;
 }
 
 .hidden-input {
@@ -1284,11 +1296,12 @@ code {
   }
 
   .capture-preview {
-    aspect-ratio: 3 / 4;
+    aspect-ratio: 4 / 3;
+    max-height: min(46dvh, 380px);
   }
 
   .capture-guide--label {
-    inset: 18% 6% 28%;
+    inset: 10% 6% 14%;
   }
 
   .capture-guide--barcode {
