@@ -1274,6 +1274,14 @@ function deliveryNoteTemplate(note) {
           ${analysis ? "Reanalyser" : "Analyser"}
         </button>
         <button
+          class="btn btn--secondary document-card__action"
+          type="button"
+          data-action="simulate-delivery-note"
+          data-note-id="${escapeHtml(note.id)}"
+        >
+          Simuler les colis
+        </button>
+        <button
           class="btn btn--danger document-card__action"
           type="button"
           data-action="delete-delivery-note"
@@ -1609,6 +1617,21 @@ async function handleDeliveryNoteListClick(event) {
     return;
   }
 
+  if (button.dataset.action === "simulate-delivery-note") {
+    const noteId = button.dataset.noteId;
+    if (!noteId) {
+      return;
+    }
+
+    try {
+      await simulateDeliveryNoteParcels(noteId);
+    } catch (error) {
+      ui.deliveryNoteStatus.textContent = "Impossible de simuler les colis de ce PDF.";
+      showToast("Impossible de simuler les colis de ce PDF.", "danger");
+    }
+    return;
+  }
+
   if (button.dataset.action !== "delete-delivery-note") {
     return;
   }
@@ -1675,6 +1698,119 @@ async function analyzeDeliveryNote(noteId, providedFile = null) {
       : analysis.parseError
       ? `Analyse terminee, mais aucune livraison exploitable n'a ete detectee dans ${deliveryNote.name}.`
       : `Aucun colis manquant detecte dans ${deliveryNote.name}.`;
+  } finally {
+    deliveryNoteAnalysis.busy = false;
+    setDeliveryNoteBusy(false);
+  }
+}
+
+async function simulateDeliveryNoteParcels(noteId) {
+  const deliveryNote = state.deliveryNotes.find((note) => note.id === noteId);
+  if (!deliveryNote || deliveryNoteAnalysis.busy) {
+    return;
+  }
+
+  const baques = getOrderedBaquesForLayout();
+  if (!baques.length) {
+    showToast("Ajoutez au moins une baque avant de lancer la simulation.", "danger");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Simuler les colis du PDF ${deliveryNote.name} et les repartir aleatoirement dans ${baques.length} baque${baques.length > 1 ? "s" : ""} ? Les colis deja presents sont conserves, mais les memes numeros de commande pourront etre mis a jour et deplaces.`,
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  const file = await getDeliveryNoteFile(noteId);
+  if (!file) {
+    throw new Error("missing-pdf-file");
+  }
+
+  try {
+    setDeliveryNoteBusy(true, "Simulation...");
+    deliveryNoteAnalysis.busy = true;
+    ui.deliveryNoteStatus.textContent = `Preparation de la simulation depuis ${deliveryNote.name}...`;
+
+    const extractedText = await extractTextFromPdfFile(file, (message) => {
+      ui.deliveryNoteStatus.textContent = message;
+    });
+    const entries = parseDeliveryNoteText(extractedText);
+    if (!entries.length) {
+      throw new Error("delivery-note-empty");
+    }
+
+    const affectedBaqueIds = new Set();
+    let createdCount = 0;
+    let updatedCount = 0;
+
+    entries.forEach((entry) => {
+      const expectedCount = Math.max(1, Number(entry.expectedCount || 1));
+
+      for (let index = 1; index <= expectedCount; index += 1) {
+        const baque = pickRandomBaque(baques);
+        const packageIndex = expectedCount > 1 ? `${index}/${expectedCount}` : "";
+        const result = upsertSimulatedParcel(
+          {
+            commandNumber: entry.commandNumber,
+            barcode: expectedCount > 1 ? `${entry.commandNumber}${String(index).padStart(3, "0")}` : entry.commandNumber,
+            routeCode: "",
+            destination: buildDeliveryEntryDestinationLabel(entry),
+            client: normalizeFreeText(entry.client || ""),
+            description: "",
+            routeLabel: "",
+            reference: "",
+            shippingDate: "",
+            weight: "",
+            packageIndex,
+          },
+          baque.id,
+        );
+
+        if (result.action === "created") {
+          createdCount += 1;
+        }
+
+        if (result.action === "updated") {
+          updatedCount += 1;
+        }
+
+        result.affectedBaqueIds.forEach((baqueId) => {
+          if (baqueId) {
+            affectedBaqueIds.add(baqueId);
+          }
+        });
+      }
+    });
+
+    invalidateBaqueValidations([...affectedBaqueIds]);
+
+    const analysis = compareDeliveryNoteEntries(entries);
+    deliveryNote.analysis = {
+      ...analysis,
+      analyzedAt: new Date().toISOString(),
+    };
+
+    saveState();
+    render();
+
+    const simulatedCount = createdCount + updatedCount;
+    if (!simulatedCount) {
+      ui.deliveryNoteStatus.textContent = `Aucun colis n'a pu etre simule depuis ${deliveryNote.name}.`;
+      showToast("Aucun colis de simulation n'a ete ajoute.", "danger");
+      return;
+    }
+
+    ui.deliveryNoteStatus.textContent = analysis.totalMissingCount
+      ? `Simulation terminee : ${simulatedCount} colis prepares, mais ${analysis.totalMissingCount} colis restent manquants dans ${deliveryNote.name}.`
+      : `Simulation terminee : ${simulatedCount} colis prepares depuis ${deliveryNote.name}.`;
+
+    showToast(
+      analysis.totalMissingCount
+        ? `Simulation terminee : ${createdCount} ajoutes, ${updatedCount} mis a jour. ${analysis.totalMissingCount} colis restent manquants.`
+        : `Simulation terminee : ${createdCount} colis ajoutes et ${updatedCount} mis a jour.`,
+    );
   } finally {
     deliveryNoteAnalysis.busy = false;
     setDeliveryNoteBusy(false);
@@ -3061,6 +3197,15 @@ function createId() {
   return `id-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
+function pickRandomBaque(baques) {
+  const list = Array.isArray(baques) ? baques.filter(Boolean) : [];
+  if (!list.length) {
+    throw new Error("missing-baque");
+  }
+
+  return list[Math.floor(Math.random() * list.length)];
+}
+
 function normalizeDestination(value) {
   return sanitizeDestination(value);
 }
@@ -3157,6 +3302,74 @@ function normalizeParcelData(parcel) {
   };
 }
 
+function upsertSimulatedParcel(parcelData, baqueId) {
+  const baque = getBaqueById(baqueId);
+  if (!baque) {
+    return {
+      action: "skipped",
+      affectedBaqueIds: [],
+    };
+  }
+
+  const normalizedParcelData = normalizeParcelData(parcelData);
+  const commandNumber = getParcelCommandNumber(normalizedParcelData);
+  if (!commandNumber && !normalizedParcelData.barcode && !normalizedParcelData.destination && !normalizedParcelData.routeCode) {
+    return {
+      action: "skipped",
+      affectedBaqueIds: [],
+    };
+  }
+
+  const now = new Date().toISOString();
+  const existing = findExistingParcel(normalizedParcelData);
+  if (existing) {
+    const previousBaqueId = existing.currentBaqueId;
+    existing.barcode = normalizedParcelData.barcode;
+    existing.commandNumber = commandNumber;
+    existing.routeCode = normalizedParcelData.routeCode;
+    existing.destination = normalizedParcelData.destination;
+    existing.client = normalizedParcelData.client;
+    existing.description = normalizedParcelData.description;
+    existing.routeLabel = normalizedParcelData.routeLabel;
+    existing.reference = normalizedParcelData.reference;
+    existing.shippingDate = normalizedParcelData.shippingDate;
+    existing.weight = normalizedParcelData.weight;
+    existing.packageIndex = normalizedParcelData.packageIndex;
+    existing.currentBaqueId = baqueId;
+    existing.updatedAt = now;
+
+    return {
+      action: "updated",
+      affectedBaqueIds: [previousBaqueId, baqueId],
+    };
+  }
+
+  state.parcels.unshift({
+    id: createId(),
+    barcode: normalizedParcelData.barcode,
+    commandNumber,
+    routeCode: normalizedParcelData.routeCode,
+    destination: normalizedParcelData.destination,
+    client: normalizedParcelData.client,
+    description: normalizedParcelData.description,
+    routeLabel: normalizedParcelData.routeLabel,
+    reference: normalizedParcelData.reference,
+    shippingDate: normalizedParcelData.shippingDate,
+    weight: normalizedParcelData.weight,
+    packageIndex: normalizedParcelData.packageIndex,
+    currentBaqueId: baqueId,
+    originBaqueId: baqueId,
+    originBaqueLabel: baque.name,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return {
+    action: "created",
+    affectedBaqueIds: [baqueId],
+  };
+}
+
 function getParcelDestinationDisplay(parcel) {
   return parcel.destination || formatRouteCodeForDisplay(parcel.routeCode) || "Sans destination";
 }
@@ -3171,6 +3384,22 @@ function getDestinationRuleMatchModeLabel(matchMode) {
 
 function getParcelIdentifier(parcel) {
   return getParcelCommandNumber(parcel) || parcel.barcode || formatRouteCodeForDisplay(parcel.routeCode) || "Sans code";
+}
+
+function buildDeliveryEntryDestinationLabel(entry) {
+  const city = sanitizeDestination(entry?.city || "");
+  const postalCode = extractDeliveryEntryPostalCode(entry);
+  if (postalCode && city) {
+    return `${postalCode} ${city}`;
+  }
+
+  return city || postalCode || "";
+}
+
+function extractDeliveryEntryPostalCode(entry) {
+  const rawContext = normalizeDeliveryTextLine(entry?.rawContext || "");
+  const match = rawContext.match(/\b\d{5}\b/);
+  return match ? match[0] : "";
 }
 
 function findExistingParcel(parcelData) {
