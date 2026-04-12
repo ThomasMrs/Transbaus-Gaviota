@@ -148,9 +148,9 @@ function bindEvents() {
   ui.destinationRulesList.addEventListener("click", handleDestinationRulesClick);
   ui.destinationRulesList.addEventListener("change", handleDestinationRulesChange);
   ui.destinationSummary.addEventListener("click", handleDestinationSummaryClick);
-  ui.openScannerBtn.addEventListener("click", openScanner);
-  ui.importBarcodeBtn.addEventListener("click", openBarcodeCameraPicker);
-  ui.chooseBarcodeBtn.addEventListener("click", openBarcodeLibraryPicker);
+  ui.openScannerBtn?.addEventListener("click", openScanner);
+  ui.importBarcodeBtn?.addEventListener("click", openBarcodeCameraPicker);
+  ui.chooseBarcodeBtn?.addEventListener("click", openBarcodeLibraryPicker);
   ui.scanLabelBtn.addEventListener("click", openLabelCameraPicker);
   ui.chooseLabelBtn.addEventListener("click", openLabelLibraryPicker);
   ui.barcodeCameraInput.addEventListener("change", handleBarcodeImageChange);
@@ -2041,7 +2041,9 @@ async function processBarcodeFile(file) {
 
   try {
     setBarcodeImportBusy(true);
-    ui.barcodeStatus.textContent = "Analyse de la photo du code-barres...";
+    if (ui.barcodeStatus) {
+      ui.barcodeStatus.textContent = "Analyse de la photo du code-barres...";
+    }
 
     fileScanner = new Html5Qrcode("barcodeFileReader");
     const decodedText = await fileScanner.scanFile(file, false);
@@ -2051,13 +2053,19 @@ async function processBarcodeFile(file) {
 
     const added = upsertParcel(normalizedCode);
     if (!added) {
-      ui.barcodeStatus.textContent = "Code-barres detecte. Verifiez le numero destination puis enregistrez.";
+      if (ui.barcodeStatus) {
+        ui.barcodeStatus.textContent = "Code-barres detecte. Verifiez le numero destination puis enregistrez.";
+      }
       showToast("Code-barres detecte.");
     } else {
-      ui.barcodeStatus.textContent = "Code-barres detecte et applique au colis.";
+      if (ui.barcodeStatus) {
+        ui.barcodeStatus.textContent = "Code-barres detecte et applique au colis.";
+      }
     }
   } catch (error) {
-    ui.barcodeStatus.textContent = "Impossible de lire le code-barres sur cette photo.";
+    if (ui.barcodeStatus) {
+      ui.barcodeStatus.textContent = "Impossible de lire le code-barres sur cette photo.";
+    }
     showToast("Impossible de lire le code-barres. Essayez une photo plus nette.", "danger");
   } finally {
     if (fileScanner) {
@@ -2761,10 +2769,14 @@ function setOcrBusy(isBusy) {
 
 function setBarcodeImportBusy(isBusy) {
   scanner.importingBarcode = isBusy;
-  ui.importBarcodeBtn.disabled = isBusy;
-  ui.chooseBarcodeBtn.disabled = isBusy;
-  ui.importBarcodeBtn.textContent = isBusy ? "Analyse en cours..." : "Prendre une photo";
-  ui.chooseBarcodeBtn.textContent = isBusy ? "Analyse en cours..." : "Choisir une photo";
+  if (ui.importBarcodeBtn) {
+    ui.importBarcodeBtn.disabled = isBusy;
+    ui.importBarcodeBtn.textContent = isBusy ? "Analyse en cours..." : "Prendre une photo";
+  }
+  if (ui.chooseBarcodeBtn) {
+    ui.chooseBarcodeBtn.disabled = isBusy;
+    ui.chooseBarcodeBtn.textContent = isBusy ? "Analyse en cours..." : "Choisir une photo";
+  }
 }
 
 function resetLabelInputs() {
@@ -3172,7 +3184,9 @@ function clearParcelForm() {
   ui.packageIndexInput.value = "";
   ui.barcodeInput.value = "";
   ui.ocrStatus.textContent = "";
-  ui.barcodeStatus.textContent = "";
+  if (ui.barcodeStatus) {
+    ui.barcodeStatus.textContent = "";
+  }
   ui.routeCodeInput.focus();
 }
 
