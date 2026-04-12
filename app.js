@@ -7,9 +7,8 @@ const ACCESS_FAILED_ATTEMPTS_LIMIT = 3;
 const ACCESS_LOCK_DURATION_MS = 10_000;
 const PDF_DB_NAME = "le-baus-du-tri-documents-v1";
 const PDF_STORE_NAME = "delivery-notes";
-const PDFJS_VERSION = "5.6.205";
-const PDFJS_MODULE_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/legacy/build/pdf.mjs`;
-const PDFJS_WORKER_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/legacy/build/pdf.worker.mjs`;
+const PDFJS_SCRIPT_URL = "vendor/pdf.min.js";
+const PDFJS_WORKER_URL = "vendor/pdf.worker.min.js";
 const DEFAULT_COLLAPSE_STATE = {
   flow: true,
   scanner: false,
@@ -3768,7 +3767,7 @@ function getDeliveryNoteErrorMessage(error, fallbackMessage = "Impossible d'anal
     return "Le lecteur PDF du telephone n'etait pas compatible. Rechargez la page puis reessayez.";
   }
 
-  if (/failed to fetch dynamically imported module|importing a module script failed|load failed|fetch/i.test(rawMessage)) {
+  if (/pdfjs-script-load-failed|pdfjs-unavailable|failed to fetch dynamically imported module|importing a module script failed|load failed|fetch/i.test(rawMessage)) {
     return "Le lecteur PDF n'a pas pu etre charge. Verifiez la connexion puis rechargez la page.";
   }
 
@@ -3814,11 +3813,20 @@ function formatRouteCodeForDisplay(routeCode) {
 
 async function getPdfJs() {
   ensurePdfJsCompatibility();
+  if (window.pdfjsLib) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+    return window.pdfjsLib;
+  }
+
   if (!pdfjsLibPromise) {
-    pdfjsLibPromise = import(PDFJS_MODULE_URL)
-      .then((module) => {
-        module.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
-        return module;
+    pdfjsLibPromise = loadPdfJsScript()
+      .then(() => {
+        if (!window.pdfjsLib) {
+          throw new Error("pdfjs-unavailable");
+        }
+
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+        return window.pdfjsLib;
       })
       .catch((error) => {
         pdfjsLibPromise = null;
@@ -3827,6 +3835,29 @@ async function getPdfJs() {
   }
 
   return pdfjsLibPromise;
+}
+
+function loadPdfJsScript() {
+  if (window.pdfjsLib) {
+    return Promise.resolve(window.pdfjsLib);
+  }
+
+  return new Promise((resolve, reject) => {
+    const existingScript = document.querySelector('script[data-role="pdfjs-runtime"]');
+    if (existingScript instanceof HTMLScriptElement) {
+      existingScript.addEventListener("load", () => resolve(window.pdfjsLib), { once: true });
+      existingScript.addEventListener("error", () => reject(new Error("pdfjs-script-load-failed")), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = PDFJS_SCRIPT_URL;
+    script.defer = true;
+    script.dataset.role = "pdfjs-runtime";
+    script.onload = () => resolve(window.pdfjsLib);
+    script.onerror = () => reject(new Error("pdfjs-script-load-failed"));
+    document.head.append(script);
+  });
 }
 
 function ensurePdfJsCompatibility() {
