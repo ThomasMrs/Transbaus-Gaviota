@@ -362,8 +362,8 @@ function loadState() {
       id: baque.id || createId(),
       name: String(baque.name || "Baque"),
       location: String(baque.location || "Sans emplacement"),
-      validatedAt: String(baque.validatedAt || ""),
-      createdAt: baque.createdAt || new Date().toISOString(),
+      validatedAt: normalizeStoredDate(baque.validatedAt || "", ""),
+      createdAt: normalizeStoredDate(baque.createdAt, new Date().toISOString()),
     }));
 
     const knownIds = new Set(baques.map((baque) => baque.id));
@@ -385,8 +385,8 @@ function loadState() {
         currentBaqueId: parcel.currentBaqueId,
         originBaqueId: parcel.originBaqueId || parcel.currentBaqueId,
         originBaqueLabel: String(parcel.originBaqueLabel || ""),
-        createdAt: parcel.createdAt || new Date().toISOString(),
-        updatedAt: parcel.updatedAt || parcel.createdAt || new Date().toISOString(),
+        createdAt: normalizeStoredDate(parcel.createdAt, new Date().toISOString()),
+        updatedAt: normalizeStoredDate(parcel.updatedAt || parcel.createdAt, new Date().toISOString()),
       }))
       .filter((parcel) => parcel.routeCode || parcel.commandNumber || parcel.barcode || parcel.destination);
     const deliveryNotes = Array.isArray(parsed.deliveryNotes)
@@ -990,63 +990,96 @@ function buildBaqueTargetOptions(selectedBaqueId = "") {
 }
 
 function renderBaques() {
-  ui.baquesGrid.innerHTML = getOrderedBaquesForLayout()
-    .map((baque) => {
-      const parcels = getParcelsForBaque(baque.id);
-      const validationBadge = baque.validatedAt
-        ? `<span class="validation-pill">Validee</span>`
-        : "";
-      const validationMeta = baque.validatedAt
-        ? `<p class="baque-card__validation-meta">Validee le ${escapeHtml(formatDate(baque.validatedAt))}</p>`
-        : `<p class="baque-card__validation-meta">Baque non validee</p>`;
+  const baques = getOrderedBaquesForLayout();
+  if (!baques.length) {
+    ui.baquesGrid.innerHTML = `
+      <article class="empty-card">
+        <p class="empty-state">Aucune baque disponible. Rechargez la page pour restaurer les emplacements par defaut.</p>
+      </article>
+    `;
+    return;
+  }
 
-      return `
-        <article class="baque-card${baque.validatedAt ? " baque-card--validated" : ""}" data-baque-id="${escapeHtml(baque.id)}">
-          <div class="baque-card__top">
-            <div class="baque-card__meta">
-              <div class="baque-card__status">
-                <span class="count-pill">${escapeHtml(String(parcels.length))} ${escapeHtml(pluralize(parcels.length, "colis", "colis"))}</span>
-                ${validationBadge}
-              </div>
-              <div class="baque-card__actions">
-                <button class="btn btn--secondary" type="button" data-action="toggle-baque-validation" data-baque-id="${escapeHtml(baque.id)}">
-                  ${baque.validatedAt ? "Retirer la validation" : "Valider la baque"}
-                </button>
-                <button class="btn btn--danger" type="button" data-action="delete-baque" data-baque-id="${escapeHtml(baque.id)}">
-                  Supprimer la baque
-                </button>
-              </div>
-            </div>
-
-            <label class="baque-card__title">
-              <input
-                type="text"
-                value="${escapeAttribute(baque.name)}"
-                data-field="name"
-                data-baque-id="${escapeHtml(baque.id)}"
-                aria-label="Nom de la baque"
-              >
-            </label>
-
-            <label class="baque-card__location">
-              <input
-                type="text"
-                value="${escapeAttribute(baque.location)}"
-                data-field="location"
-                data-baque-id="${escapeHtml(baque.id)}"
-                aria-label="Emplacement de la baque"
-              >
-            </label>
-            ${validationMeta}
-          </div>
-
-          <div class="parcel-list">
-            ${parcels.length ? parcels.map((parcel) => parcelTemplate(parcel)).join("") : emptyBaqueTemplate()}
-          </div>
-        </article>
-      `;
-    })
+  ui.baquesGrid.innerHTML = baques
+    .map((baque) => renderBaqueCard(baque))
     .join("");
+}
+
+function renderBaqueCard(baque) {
+  const parcels = getParcelsForBaque(baque.id);
+  const validationBadge = baque.validatedAt
+    ? `<span class="validation-pill">Validee</span>`
+    : "";
+  const validationMeta = baque.validatedAt
+    ? `<p class="baque-card__validation-meta">Validee le ${escapeHtml(formatDate(baque.validatedAt))}</p>`
+    : `<p class="baque-card__validation-meta">Baque non validee</p>`;
+  const parcelMarkup = parcels.length
+    ? parcels.map((parcel) => safeParcelTemplate(parcel)).join("")
+    : emptyBaqueTemplate();
+
+  return `
+    <article class="baque-card${baque.validatedAt ? " baque-card--validated" : ""}" data-baque-id="${escapeHtml(baque.id)}">
+      <div class="baque-card__top">
+        <div class="baque-card__meta">
+          <div class="baque-card__status">
+            <span class="count-pill">${escapeHtml(String(parcels.length))} ${escapeHtml(pluralize(parcels.length, "colis", "colis"))}</span>
+            ${validationBadge}
+          </div>
+          <div class="baque-card__actions">
+            <button class="btn btn--secondary" type="button" data-action="toggle-baque-validation" data-baque-id="${escapeHtml(baque.id)}">
+              ${baque.validatedAt ? "Retirer la validation" : "Valider la baque"}
+            </button>
+            <button class="btn btn--danger" type="button" data-action="delete-baque" data-baque-id="${escapeHtml(baque.id)}">
+              Supprimer la baque
+            </button>
+          </div>
+        </div>
+
+        <label class="baque-card__title">
+          <input
+            type="text"
+            value="${escapeAttribute(baque.name)}"
+            data-field="name"
+            data-baque-id="${escapeHtml(baque.id)}"
+            aria-label="Nom de la baque"
+          >
+        </label>
+
+        <label class="baque-card__location">
+          <input
+            type="text"
+            value="${escapeAttribute(baque.location)}"
+            data-field="location"
+            data-baque-id="${escapeHtml(baque.id)}"
+            aria-label="Emplacement de la baque"
+          >
+        </label>
+        ${validationMeta}
+      </div>
+
+      <div class="parcel-list">
+        ${parcelMarkup}
+      </div>
+    </article>
+  `;
+}
+
+function safeParcelTemplate(parcel) {
+  try {
+    return parcelTemplate(parcel);
+  } catch (error) {
+    console.error("Rendu colis impossible", parcel, error);
+    return `
+      <article class="parcel-item">
+        <div class="parcel-item__top">
+          <div>
+            <p class="parcel-code">${escapeHtml(getParcelIdentifier(parcel))}</p>
+            <p class="parcel-meta">Ce colis contient une donnee invalide. Ouvrez-le depuis un autre appareil ou rescanez-le.</p>
+          </div>
+        </div>
+      </article>
+    `;
+  }
 }
 
 function parcelTemplate(parcel) {
@@ -3731,7 +3764,7 @@ function normalizeDeliveryNote(note) {
     id: String(note.id),
     name: normalizeFreeText(String(note.name)),
     size: Number(note.size || 0),
-    importedAt: note.importedAt,
+    importedAt: normalizeStoredDate(note.importedAt, new Date().toISOString()),
     analysis: normalizeDeliveryNoteAnalysis(note.analysis),
   };
 }
@@ -3759,7 +3792,7 @@ function normalizeDeliveryNoteAnalysis(analysis) {
         rawContext: normalizeFreeText(entry.rawContext || ""),
       }))
       .filter((entry) => entry.commandNumber),
-    analyzedAt: analysis.analyzedAt || "",
+    analyzedAt: normalizeStoredDate(analysis.analyzedAt || "", ""),
   };
 }
 
@@ -4828,10 +4861,19 @@ function showToast(message, type = "default") {
 }
 
 function formatDate(value) {
-  return new Intl.DateTimeFormat("fr-FR", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(new Date(value));
+  const normalizedDate = normalizeStoredDate(value, "");
+  if (!normalizedDate) {
+    return "Date inconnue";
+  }
+
+  try {
+    return new Intl.DateTimeFormat("fr-FR", {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(new Date(normalizedDate));
+  } catch (error) {
+    return new Date(normalizedDate).toLocaleString("fr-FR");
+  }
 }
 
 function pluralize(count, singular, plural) {
@@ -4849,4 +4891,13 @@ function escapeHtml(value) {
 
 function escapeAttribute(value) {
   return escapeHtml(value);
+}
+
+function normalizeStoredDate(value, fallback = "") {
+  if (!value) {
+    return fallback;
+  }
+
+  const parsedDate = new Date(value);
+  return Number.isNaN(parsedDate.getTime()) ? fallback : parsedDate.toISOString();
 }
