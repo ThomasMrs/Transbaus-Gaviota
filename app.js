@@ -363,6 +363,7 @@ function loadState() {
       id: baque.id || createId(),
       name: String(baque.name || "Baque"),
       location: String(baque.location || "Sans emplacement"),
+      validatedAt: String(baque.validatedAt || ""),
       createdAt: baque.createdAt || new Date().toISOString(),
     }));
 
@@ -417,6 +418,7 @@ function createDefaultState() {
       id: createId(),
       name: baque.name,
       location: baque.location,
+      validatedAt: "",
       createdAt: new Date().toISOString(),
     })),
     parcels: [],
@@ -992,15 +994,29 @@ function renderBaques() {
   ui.baquesGrid.innerHTML = getOrderedBaquesForLayout()
     .map((baque) => {
       const parcels = getParcelsForBaque(baque.id);
+      const validationBadge = baque.validatedAt
+        ? `<span class="validation-pill">Validee</span>`
+        : "";
+      const validationMeta = baque.validatedAt
+        ? `<p class="baque-card__validation-meta">Validee le ${escapeHtml(formatDate(baque.validatedAt))}</p>`
+        : `<p class="baque-card__validation-meta">Baque non validee</p>`;
 
       return `
-        <article class="baque-card" data-baque-id="${escapeHtml(baque.id)}">
+        <article class="baque-card${baque.validatedAt ? " baque-card--validated" : ""}" data-baque-id="${escapeHtml(baque.id)}">
           <div class="baque-card__top">
             <div class="baque-card__meta">
-              <span class="count-pill">${escapeHtml(String(parcels.length))} ${escapeHtml(pluralize(parcels.length, "colis", "colis"))}</span>
-              <button class="btn btn--danger" type="button" data-action="delete-baque" data-baque-id="${escapeHtml(baque.id)}">
-                Supprimer la baque
-              </button>
+              <div class="baque-card__status">
+                <span class="count-pill">${escapeHtml(String(parcels.length))} ${escapeHtml(pluralize(parcels.length, "colis", "colis"))}</span>
+                ${validationBadge}
+              </div>
+              <div class="baque-card__actions">
+                <button class="btn btn--secondary" type="button" data-action="toggle-baque-validation" data-baque-id="${escapeHtml(baque.id)}">
+                  ${baque.validatedAt ? "Retirer la validation" : "Valider la baque"}
+                </button>
+                <button class="btn btn--danger" type="button" data-action="delete-baque" data-baque-id="${escapeHtml(baque.id)}">
+                  Supprimer la baque
+                </button>
+              </div>
             </div>
 
             <label class="baque-card__title">
@@ -1022,6 +1038,7 @@ function renderBaques() {
                 aria-label="Emplacement de la baque"
               >
             </label>
+            ${validationMeta}
           </div>
 
           <div class="parcel-list">
@@ -1289,6 +1306,7 @@ function handleBaqueSubmit(event) {
     id: createId(),
     name,
     location,
+    validatedAt: "",
     createdAt: new Date().toISOString(),
   });
 
@@ -1418,6 +1436,10 @@ function handleBaqueGridClick(event) {
 
   if (action === "delete-baque" && baqueId) {
     deleteBaque(baqueId);
+  }
+
+  if (action === "toggle-baque-validation" && baqueId) {
+    toggleBaqueValidation(baqueId);
   }
 
   if (action === "delete-parcel" && parcelId) {
@@ -2556,6 +2578,7 @@ function upsertParcel(scannedBarcode = "") {
 
   if (existing) {
     const moved = existing.currentBaqueId !== baqueId;
+    const previousBaqueId = existing.currentBaqueId;
     existing.barcode = normalizedParcelData.barcode;
     existing.commandNumber = commandNumber;
     existing.routeCode = normalizedParcelData.routeCode;
@@ -2570,6 +2593,7 @@ function upsertParcel(scannedBarcode = "") {
     existing.currentBaqueId = baqueId;
     existing.updatedAt = now;
 
+    invalidateBaqueValidations([previousBaqueId, baqueId]);
     saveState();
     render();
     clearParcelForm();
@@ -2601,6 +2625,7 @@ function upsertParcel(scannedBarcode = "") {
     updatedAt: now,
   });
 
+  invalidateBaqueValidation(baqueId);
   saveState();
   render();
   clearParcelForm();
@@ -2646,6 +2671,11 @@ function deleteBaque(baqueId) {
 
   state.baques = state.baques.filter((item) => item.id !== baqueId);
   state.parcels = state.parcels.filter((parcel) => parcel.currentBaqueId !== baqueId);
+  state.destinationRules = state.destinationRules.map((rule) => (
+    rule.preferredBaqueId === baqueId
+      ? { ...rule, preferredBaqueId: "" }
+      : rule
+  ));
   saveState();
   render();
   showToast("Baque supprimee.");
@@ -2667,6 +2697,54 @@ function deleteDestinationRule(ruleId) {
   showToast(`Regle "${rule.label}" supprimee.`);
 }
 
+function toggleBaqueValidation(baqueId) {
+  const baque = getBaqueById(baqueId);
+  if (!baque) {
+    return;
+  }
+
+  if (baque.validatedAt) {
+    baque.validatedAt = "";
+    saveState();
+    render();
+    showToast(`Validation retiree pour ${baque.name}.`);
+    return;
+  }
+
+  baque.validatedAt = new Date().toISOString();
+  saveState();
+  render();
+  showToast(`${baque.name} marquee comme terminee.`);
+}
+
+function invalidateBaqueValidation(baqueId) {
+  if (!baqueId) {
+    return false;
+  }
+
+  const baque = getBaqueById(baqueId);
+  if (!baque?.validatedAt) {
+    return false;
+  }
+
+  baque.validatedAt = "";
+  return true;
+}
+
+function invalidateBaqueValidations(baqueIds) {
+  const uniqueBaqueIds = [...new Set(
+    (Array.isArray(baqueIds) ? baqueIds : [baqueIds])
+      .filter(Boolean),
+  )];
+  let invalidated = false;
+
+  uniqueBaqueIds.forEach((baqueId) => {
+    invalidated = invalidateBaqueValidation(baqueId) || invalidated;
+  });
+
+  return invalidated;
+}
+
 function deleteParcel(parcelId) {
   const parcel = state.parcels.find((item) => item.id === parcelId);
   if (!parcel) {
@@ -2677,6 +2755,7 @@ function deleteParcel(parcelId) {
     return;
   }
 
+  invalidateBaqueValidation(parcel.currentBaqueId);
   state.parcels = state.parcels.filter((item) => item.id !== parcelId);
   saveState();
   render();
@@ -2710,8 +2789,10 @@ function moveParcel(parcelId) {
     return;
   }
 
+  const previousBaqueId = parcel.currentBaqueId;
   parcel.currentBaqueId = nextBaqueId;
   parcel.updatedAt = new Date().toISOString();
+  invalidateBaqueValidations([previousBaqueId, nextBaqueId]);
   saveState();
   render();
   showToast(`Colis ${getParcelIdentifier(parcel)} deplace vers ${nextBaque.name}.`);
