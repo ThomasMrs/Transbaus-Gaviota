@@ -8,8 +8,8 @@ const ACCESS_LOCK_DURATION_MS = 10_000;
 const PDF_DB_NAME = "le-baus-du-tri-documents-v1";
 const PDF_STORE_NAME = "delivery-notes";
 const PDFJS_VERSION = "5.6.205";
-const PDFJS_MODULE_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.mjs`;
-const PDFJS_WORKER_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.mjs`;
+const PDFJS_MODULE_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/legacy/build/pdf.mjs`;
+const PDFJS_WORKER_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/legacy/build/pdf.worker.mjs`;
 const DEFAULT_COLLAPSE_STATE = {
   flow: true,
   scanner: false,
@@ -1584,12 +1584,16 @@ async function handleDeliveryNoteImport(event) {
       await analyzeDeliveryNote(deliveryNote.id, file);
       showToast(`PDF ${deliveryNote.name} importe et compare.`);
     } catch (error) {
-      ui.deliveryNoteStatus.textContent = `PDF importe : ${deliveryNote.name}. Analyse impossible pour le moment.`;
-      showToast(`PDF ${deliveryNote.name} importe, mais l'analyse a echoue.`, "danger");
+      const errorMessage = getDeliveryNoteErrorMessage(error);
+      console.error("Erreur d'analyse PDF apres import", error);
+      ui.deliveryNoteStatus.textContent = `PDF importe : ${deliveryNote.name}. ${errorMessage}`;
+      showToast(errorMessage, "danger");
     }
   } catch (error) {
-    ui.deliveryNoteStatus.textContent = "Impossible d'importer ce PDF.";
-    showToast("Impossible d'importer ce PDF.", "danger");
+    const errorMessage = getDeliveryNoteErrorMessage(error, "Impossible d'importer ce PDF.");
+    console.error("Erreur d'import PDF", error);
+    ui.deliveryNoteStatus.textContent = errorMessage;
+    showToast(errorMessage, "danger");
   } finally {
     ui.deliveryNoteInput.value = "";
     setDeliveryNoteBusy(false);
@@ -1611,8 +1615,10 @@ async function handleDeliveryNoteListClick(event) {
     try {
       await analyzeDeliveryNote(noteId);
     } catch (error) {
-      ui.deliveryNoteStatus.textContent = "Impossible d'analyser ce PDF.";
-      showToast("Impossible d'analyser ce PDF.", "danger");
+      const errorMessage = getDeliveryNoteErrorMessage(error);
+      console.error("Erreur d'analyse PDF", error);
+      ui.deliveryNoteStatus.textContent = errorMessage;
+      showToast(errorMessage, "danger");
     }
     return;
   }
@@ -1626,8 +1632,10 @@ async function handleDeliveryNoteListClick(event) {
     try {
       await simulateDeliveryNoteParcels(noteId);
     } catch (error) {
-      ui.deliveryNoteStatus.textContent = "Impossible de simuler les colis de ce PDF.";
-      showToast("Impossible de simuler les colis de ce PDF.", "danger");
+      const errorMessage = getDeliveryNoteErrorMessage(error, "Impossible de simuler les colis de ce PDF.");
+      console.error("Erreur de simulation PDF", error);
+      ui.deliveryNoteStatus.textContent = errorMessage;
+      showToast(errorMessage, "danger");
     }
     return;
   }
@@ -1698,6 +1706,22 @@ async function analyzeDeliveryNote(noteId, providedFile = null) {
       : analysis.parseError
       ? `Analyse terminee, mais aucune livraison exploitable n'a ete detectee dans ${deliveryNote.name}.`
       : `Aucun colis manquant detecte dans ${deliveryNote.name}.`;
+  } catch (error) {
+    const errorMessage = getDeliveryNoteErrorMessage(error);
+    deliveryNote.analysis = {
+      totalEntries: 0,
+      totalExpectedCount: 0,
+      totalRegisteredCount: 0,
+      totalMissingCount: 0,
+      incomparableParcelsCount: countIncomparableParcels(),
+      parseError: errorMessage,
+      missingEntries: [],
+      analyzedAt: new Date().toISOString(),
+    };
+    saveState();
+    renderDeliveryNotes();
+    ui.deliveryNoteStatus.textContent = errorMessage;
+    throw error;
   } finally {
     deliveryNoteAnalysis.busy = false;
     setDeliveryNoteBusy(false);
@@ -3734,6 +3758,35 @@ function looksLikePdf(file) {
   return file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
 }
 
+function getDeliveryNoteErrorMessage(error, fallbackMessage = "Impossible d'analyser ce PDF.") {
+  const rawMessage = normalizeFreeText(String(error?.message || error || ""));
+  if (!rawMessage) {
+    return fallbackMessage;
+  }
+
+  if (/withResolvers/i.test(rawMessage)) {
+    return "Le lecteur PDF du telephone n'etait pas compatible. Rechargez la page puis reessayez.";
+  }
+
+  if (/failed to fetch dynamically imported module|importing a module script failed|load failed|fetch/i.test(rawMessage)) {
+    return "Le lecteur PDF n'a pas pu etre charge. Verifiez la connexion puis rechargez la page.";
+  }
+
+  if (/indexeddb/i.test(rawMessage)) {
+    return "Le stockage local du PDF est bloque sur ce telephone. Desactivez le mode prive puis reessayez.";
+  }
+
+  if (/tesseract-unavailable/i.test(rawMessage)) {
+    return "L'OCR du PDF n'est pas disponible sur ce navigateur.";
+  }
+
+  if (/delivery-note-empty/i.test(rawMessage)) {
+    return "Aucune livraison exploitable n'a ete detectee dans ce PDF.";
+  }
+
+  return fallbackMessage;
+}
+
 function formatFileSize(size) {
   const bytes = Number(size || 0);
   if (bytes >= 1024 * 1024) {
@@ -3760,6 +3813,7 @@ function formatRouteCodeForDisplay(routeCode) {
 }
 
 async function getPdfJs() {
+  ensurePdfJsCompatibility();
   if (!pdfjsLibPromise) {
     pdfjsLibPromise = import(PDFJS_MODULE_URL)
       .then((module) => {
@@ -3773,6 +3827,23 @@ async function getPdfJs() {
   }
 
   return pdfjsLibPromise;
+}
+
+function ensurePdfJsCompatibility() {
+  if (typeof Promise.withResolvers === "function") {
+    return;
+  }
+
+  Promise.withResolvers = function withResolvers() {
+    let resolve;
+    let reject;
+    const promise = new Promise((promiseResolve, promiseReject) => {
+      resolve = promiseResolve;
+      reject = promiseReject;
+    });
+
+    return { promise, resolve, reject };
+  };
 }
 
 async function renderPdfPageToCanvas(page) {
