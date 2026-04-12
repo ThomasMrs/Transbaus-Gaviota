@@ -44,6 +44,7 @@ const captureSession = {
   mode: "label",
   busy: false,
   autoCaptureTimer: 0,
+  autoCaptureKickoffTimer: 0,
   lastFrameSignature: null,
   stableFrameCount: 0,
   autoTriggered: false,
@@ -117,6 +118,7 @@ function cacheElements() {
   ui.scannerStatus = document.querySelector("#scannerStatus");
   ui.closeScannerBtn = document.querySelector("#closeScannerBtn");
   ui.captureModal = document.querySelector("#captureModal");
+  ui.capturePreview = document.querySelector(".capture-preview");
   ui.captureVideo = document.querySelector("#captureVideo");
   ui.captureGuide = document.querySelector("#captureGuide");
   ui.captureTitle = document.querySelector("#captureTitle");
@@ -2052,11 +2054,12 @@ function configureCaptureModal(mode) {
 
   ui.captureTitle.textContent = isLabelMode ? "Cadrer l'etiquette" : "Cadrer le code-barres";
   ui.captureHint.textContent = isLabelMode
-    ? "Placez l'etiquette entiere dans le cadre. La photo se prend automatiquement quand elle est stable."
+    ? "Placez l'etiquette entiere dans le cadre. La photo se prend des qu'elle est detectee."
     : "Placez le code-barres au centre du cadre, evitez les reflets, puis prenez la photo.";
   ui.takeCaptureBtn.textContent = isLabelMode ? "Prendre maintenant" : "Prendre la photo";
   ui.captureGuide.classList.toggle("capture-guide--label", isLabelMode);
   ui.captureGuide.classList.toggle("capture-guide--barcode", !isLabelMode);
+  setCaptureDetectionState(false);
 }
 
 async function startCaptureStream() {
@@ -2149,7 +2152,7 @@ function startAutoCaptureMonitoring() {
   captureSession.autoTriggered = false;
   captureSession.stableFrameCount = 0;
   captureSession.lastFrameSignature = null;
-  ui.captureStatus.textContent = "Auto actif. Placez l'etiquette dans le cadre et gardez le telephone stable.";
+  ui.captureStatus.textContent = "Auto actif. Des que l'etiquette est detectee, la photo se prend.";
 
   captureSession.autoCaptureTimer = window.setInterval(() => {
     if (captureSession.mode !== "label" || captureSession.busy || captureSession.autoTriggered) {
@@ -2168,22 +2171,21 @@ function startAutoCaptureMonitoring() {
     captureSession.lastFrameSignature = analysis.signature;
 
     if (!analysis.isReady) {
-      captureSession.stableFrameCount = 0;
+      setCaptureDetectionState(false);
       ui.captureStatus.textContent = analysis.message;
       return;
     }
 
-    captureSession.stableFrameCount += 1;
-
-    if (captureSession.stableFrameCount < 3) {
-      ui.captureStatus.textContent = "Etiquette detectee. Restez immobile une seconde...";
-      return;
-    }
-
+    setCaptureDetectionState(true);
     captureSession.autoTriggered = true;
-    ui.captureStatus.textContent = "Etiquette stable detectee. Photo automatique...";
-    void handleCapturePhoto({ auto: true });
-  }, 420);
+    ui.captureStatus.textContent = "Etiquette detectee. Photo automatique...";
+    captureSession.autoCaptureKickoffTimer = window.setTimeout(() => {
+      captureSession.autoCaptureKickoffTimer = 0;
+      if (captureSession.mode === "label" && !captureSession.busy) {
+        void handleCapturePhoto({ auto: true });
+      }
+    }, 120);
+  }, 180);
 }
 
 function stopAutoCaptureMonitoring() {
@@ -2192,9 +2194,15 @@ function stopAutoCaptureMonitoring() {
     captureSession.autoCaptureTimer = 0;
   }
 
+  if (captureSession.autoCaptureKickoffTimer) {
+    window.clearTimeout(captureSession.autoCaptureKickoffTimer);
+    captureSession.autoCaptureKickoffTimer = 0;
+  }
+
   captureSession.lastFrameSignature = null;
   captureSession.stableFrameCount = 0;
   captureSession.autoTriggered = false;
+  setCaptureDetectionState(false);
 }
 
 function analyzeCurrentCaptureFrame() {
@@ -2276,8 +2284,7 @@ function analyzeCurrentCaptureFrame() {
   const centerWhiteRatio = centerPixelCount ? centerWhitePixels / centerPixelCount : 0;
   const edgeRatio = edgePixels / totalPixels;
   const motion = getCaptureFrameMotion(signature, captureSession.lastFrameSignature);
-  const isStable = motion !== null && motion <= 11;
-  const isReady = whiteRatio >= 0.34 && centerWhiteRatio >= 0.52 && contrast >= 34 && edgeRatio >= 0.06 && isStable;
+  const isReady = whiteRatio >= 0.34 && centerWhiteRatio >= 0.52 && contrast >= 34 && edgeRatio >= 0.06;
 
   return {
     signature,
@@ -2290,6 +2297,11 @@ function analyzeCurrentCaptureFrame() {
       motion,
     }),
   };
+}
+
+function setCaptureDetectionState(isDetected) {
+  ui.captureGuide?.classList.toggle("capture-guide--detected", isDetected);
+  ui.capturePreview?.classList.toggle("capture-preview--detected", isDetected);
 }
 
 function getCaptureAnalysisContext(width, height) {
@@ -2329,10 +2341,6 @@ function getCaptureFrameMotion(currentSignature, previousSignature) {
 }
 
 function buildAutoCaptureStatusMessage(metrics) {
-  if (metrics.motion === null || metrics.motion > 11) {
-    return "Auto actif. Restez immobile et gardez l'etiquette bien droite dans le cadre.";
-  }
-
   if (metrics.centerWhiteRatio < 0.52 || metrics.whiteRatio < 0.34) {
     return "Auto actif. Rapprochez ou recentrez l'etiquette pour qu'elle remplisse mieux le cadre.";
   }
@@ -2341,7 +2349,11 @@ function buildAutoCaptureStatusMessage(metrics) {
     return "Auto actif. Evitez le flou et les reflets sur l'etiquette.";
   }
 
-  return "Etiquette detectee. Restez immobile...";
+  if (metrics.motion !== null && metrics.motion > 16) {
+    return "Etiquette detectee. La photo se lance, gardez juste le telephone dans l'axe.";
+  }
+
+  return "Etiquette detectee. Capture imminente...";
 }
 
 async function captureCurrentFrame(mode) {
