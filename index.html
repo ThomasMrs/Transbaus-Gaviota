@@ -501,6 +501,13 @@
                     <option value="all">Tous les mots-cles</option>
                   </select>
                 </label>
+
+                <label class="field">
+                  <span>Baque cible</span>
+                  <select id="destinationRuleTargetBaqueSelect">
+                    <option value="">Calcul automatique</option>
+                  </select>
+                </label>
               </div>
 
               <label class="field">
@@ -519,13 +526,23 @@
               </div>
 
               <p class="field-help">
-                Une regle s'applique si la destination contient un ou plusieurs mots-cles de l'adresse.
+                Une regle s'applique si la destination contient un ou plusieurs mots-cles de l'adresse. Vous pouvez aussi imposer une baque pour regrouper plusieurs destinations differentes ensemble.
               </p>
             </form>
 
             <div id="destinationRulesList" class="destination-rules__list"></div>
           </div>
           <div id="destinationSummary" class="destination-grid"></div>
+          <div class="sorting-plan">
+            <div class="sorting-plan__intro">
+              <p class="section-kicker">Plan de tri</p>
+              <h3>Trajet conseille</h3>
+              <p class="section-caption">
+                Hypotheses : baques alignees de la 1 vers la 6, depart cote Baque 1, et priorite aux trajets courts pour les colis lourds.
+              </p>
+            </div>
+            <div id="sortingPlan" class="sorting-plan__grid"></div>
+          </div>
         </div>
       </section>
 

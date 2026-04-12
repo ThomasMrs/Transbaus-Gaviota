@@ -101,9 +101,11 @@ function cacheElements() {
   ui.destinationRuleForm = document.querySelector("#destinationRuleForm");
   ui.destinationRuleLabelInput = document.querySelector("#destinationRuleLabelInput");
   ui.destinationRuleMatchModeSelect = document.querySelector("#destinationRuleMatchModeSelect");
+  ui.destinationRuleTargetBaqueSelect = document.querySelector("#destinationRuleTargetBaqueSelect");
   ui.destinationRulePatternsInput = document.querySelector("#destinationRulePatternsInput");
   ui.destinationRulesList = document.querySelector("#destinationRulesList");
   ui.destinationSummary = document.querySelector("#destinationSummary");
+  ui.sortingPlan = document.querySelector("#sortingPlan");
   ui.baquesGrid = document.querySelector("#baquesGrid");
   ui.scannerModal = document.querySelector("#scannerModal");
   ui.reader = document.querySelector("#reader");
@@ -450,8 +452,10 @@ function saveState() {
 function render() {
   renderHeroStats();
   renderBaqueSelect();
+  renderDestinationRuleTargetOptions();
   renderDestinationRules();
   renderDestinationSummary();
+  renderSortingPlan();
   renderBaques();
   renderSearchResults();
   renderDeliveryNotes();
@@ -481,8 +485,9 @@ function statCard(value, label) {
 
 function renderBaqueSelect() {
   const previousValue = ui.parcelBaqueSelect.value;
+  const orderedBaques = getOrderedBaquesForLayout();
 
-  ui.parcelBaqueSelect.innerHTML = state.baques
+  ui.parcelBaqueSelect.innerHTML = orderedBaques
     .map(
       (baque) => `
         <option value="${escapeHtml(baque.id)}">
@@ -492,9 +497,9 @@ function renderBaqueSelect() {
     )
     .join("");
 
-  ui.parcelBaqueSelect.value = state.baques.some((baque) => baque.id === previousValue)
+  ui.parcelBaqueSelect.value = orderedBaques.some((baque) => baque.id === previousValue)
     ? previousValue
-    : state.baques[0]?.id || "";
+    : orderedBaques[0]?.id || "";
 }
 
 function renderDestinationSummary() {
@@ -558,6 +563,7 @@ function renderDestinationSummary() {
             <span>${escapeHtml(String(group.parcels.length))} colis</span>
             ${renderRouteCodeMeta(group.parcels)}
             ${group.rule ? `<span><strong>Condition :</strong> ${escapeHtml(getDestinationRuleMatchModeLabel(group.rule.matchMode))}</span>` : ""}
+            ${group.rule?.preferredBaqueId ? `<span><strong>Baque cible :</strong> ${escapeHtml(getBaqueById(group.rule.preferredBaqueId)?.name || "Baque supprimee")}</span>` : ""}
           </div>
           ${destinations}
           <div class="distribution-list">${chips}</div>
@@ -565,6 +571,314 @@ function renderDestinationSummary() {
       `;
     })
     .join("");
+}
+
+function renderSortingPlan() {
+  if (!ui.sortingPlan) {
+    return;
+  }
+
+  const plans = getSortingPlans();
+  if (!plans.length) {
+    ui.sortingPlan.innerHTML = `
+      <article class="empty-card">
+        <p class="empty-state">Le plan de tri apparaitra ici des qu'une destination sera repartie sur plusieurs baques.</p>
+      </article>
+    `;
+    return;
+  }
+
+  ui.sortingPlan.innerHTML = plans
+    .map((plan, index) => {
+      const effortLabel = getSortingEffortLabel(plan.totalEffort);
+      const metrics = [
+        `Baque cible : ${plan.targetBaque.name}`,
+        `${plan.movedCount} colis a deplacer`,
+        `${formatKnownWeightSummary(plan.totalMoveWeightKg, plan.unknownWeightCount)}`,
+        `${plan.alreadyCount} deja sur place`,
+      ];
+
+      return `
+        <article class="sorting-plan-card">
+          <div class="sorting-plan-card__top">
+            <div>
+              <p class="section-kicker">Ordre ${escapeHtml(String(index + 1))}</p>
+              <h4>${escapeHtml(plan.label)}</h4>
+            </div>
+            <span class="tag">${escapeHtml(effortLabel)}</span>
+          </div>
+          <div class="document-summary">
+            ${metrics.map((metric) => `<span class="distribution-chip">${escapeHtml(metric)}</span>`).join("")}
+          </div>
+          <p class="field-help">
+            Garder cette destination dans <strong>${escapeHtml(plan.targetBaque.name)}</strong> :
+            ${escapeHtml(plan.alreadyCount)} colis y sont deja et c'est la position qui demande le moins d'effort cumule.
+          </p>
+          <div class="sorting-pass-list">
+            ${plan.passes.map((pass, passIndex) => `
+              <article class="sorting-pass">
+                <div class="sorting-pass__head">
+                  <strong>Passage ${escapeHtml(String(passIndex + 1))}</strong>
+                  <span>${escapeHtml(pass.routeLabel)}</span>
+                </div>
+                <div class="sorting-pass__meta">
+                  <span>${escapeHtml(String(pass.movedCount))} colis</span>
+                  <span>${escapeHtml(formatKnownWeightSummary(pass.totalWeightKg, pass.unknownWeightCount))}</span>
+                  <span>${escapeHtml(pass.advice)}</span>
+                </div>
+              </article>
+            `).join("")}
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function getSortingPlans() {
+  const destinationGroups = getDestinationGroups();
+  const rawPlans = destinationGroups
+    .map((group) => buildSortingPlan(group))
+    .filter((plan) => plan && plan.movedCount > 0);
+
+  return orderSortingPlans(rawPlans);
+}
+
+function buildSortingPlan(group) {
+  const orderedBaques = getOrderedBaquesForLayout();
+  if (orderedBaques.length < 2) {
+    return null;
+  }
+
+  const layoutIndexByBaqueId = new Map(orderedBaques.map((baque, index) => [baque.id, index + 1]));
+  const preferredBaque = group.rule?.preferredBaqueId ? getBaqueById(group.rule.preferredBaqueId) : null;
+  const candidateBaques = preferredBaque ? [preferredBaque] : orderedBaques;
+  const targetCandidates = candidateBaques
+    .map((baque) => scoreSortingTargetBaque(group.parcels, baque, layoutIndexByBaqueId, orderedBaques.length))
+    .filter(Boolean)
+    .sort((left, right) => {
+      const effortDiff = left.totalEffort - right.totalEffort;
+      if (effortDiff !== 0) {
+        return effortDiff;
+      }
+
+      const distanceDiff = left.totalDistance - right.totalDistance;
+      if (distanceDiff !== 0) {
+        return distanceDiff;
+      }
+
+      const movedDiff = left.movedCount - right.movedCount;
+      if (movedDiff !== 0) {
+        return movedDiff;
+      }
+
+      const alreadyDiff = right.alreadyCount - left.alreadyCount;
+      if (alreadyDiff !== 0) {
+        return alreadyDiff;
+      }
+
+      return left.targetPosition - right.targetPosition;
+    });
+
+  const bestTarget = targetCandidates[0];
+  if (!bestTarget || !bestTarget.movedCount) {
+    return null;
+  }
+
+  return {
+    key: group.key,
+    label: group.label,
+    targetBaque: bestTarget.targetBaque,
+    targetPosition: bestTarget.targetPosition,
+    totalEffort: bestTarget.totalEffort,
+    totalDistance: bestTarget.totalDistance,
+    alreadyCount: bestTarget.alreadyCount,
+    movedCount: bestTarget.movedCount,
+    totalMoveWeightKg: bestTarget.totalMoveWeightKg,
+    unknownWeightCount: bestTarget.unknownWeightCount,
+    passes: buildSortingPasses(bestTarget),
+  };
+}
+
+function scoreSortingTargetBaque(parcels, targetBaque, layoutIndexByBaqueId, totalBaques) {
+  const targetPosition = layoutIndexByBaqueId.get(targetBaque.id);
+  if (!targetPosition) {
+    return null;
+  }
+
+  const sourceBucketsByBaqueId = new Map();
+  let totalEffort = 0;
+  let totalDistance = 0;
+  let alreadyCount = 0;
+  let movedCount = 0;
+  let totalMoveWeightKg = 0;
+  let unknownWeightCount = 0;
+
+  parcels.forEach((parcel) => {
+    const sourcePosition = layoutIndexByBaqueId.get(parcel.currentBaqueId);
+    if (!sourcePosition) {
+      return;
+    }
+
+    const distance = Math.abs(sourcePosition - targetPosition);
+    const weightKg = parseParcelWeightKg(parcel);
+    const handlingFactor = getParcelHandlingFactor(weightKg);
+
+    totalEffort += distance * handlingFactor;
+    totalDistance += distance;
+
+    if (distance === 0) {
+      alreadyCount += 1;
+      return;
+    }
+
+    movedCount += 1;
+    if (weightKg !== null) {
+      totalMoveWeightKg += weightKg;
+    } else {
+      unknownWeightCount += 1;
+    }
+
+    const sourceBaque = getBaqueById(parcel.currentBaqueId);
+    const bucket = sourceBucketsByBaqueId.get(parcel.currentBaqueId) || {
+      baqueId: parcel.currentBaqueId,
+      baqueName: sourceBaque?.name || "Baque",
+      position: sourcePosition,
+      movedCount: 0,
+      totalWeightKg: 0,
+      unknownWeightCount: 0,
+      heaviestParcelKg: 0,
+      effort: 0,
+    };
+
+    bucket.movedCount += 1;
+    bucket.effort += distance * handlingFactor;
+    if (weightKg !== null) {
+      bucket.totalWeightKg += weightKg;
+      bucket.heaviestParcelKg = Math.max(bucket.heaviestParcelKg, weightKg);
+    } else {
+      bucket.unknownWeightCount += 1;
+    }
+
+    sourceBucketsByBaqueId.set(parcel.currentBaqueId, bucket);
+  });
+
+  if (!movedCount) {
+    return {
+      targetBaque,
+      targetPosition,
+      totalEffort: 0,
+      totalDistance: 0,
+      alreadyCount,
+      movedCount: 0,
+      totalMoveWeightKg: 0,
+      unknownWeightCount: 0,
+      sourceBuckets: [],
+    };
+  }
+
+  const centerPosition = (totalBaques + 1) / 2;
+  if (totalMoveWeightKg >= 80) {
+    totalEffort += Math.abs(targetPosition - centerPosition) * 0.35;
+  }
+
+  return {
+    targetBaque,
+    targetPosition,
+    totalEffort,
+    totalDistance,
+    alreadyCount,
+    movedCount,
+    totalMoveWeightKg,
+    unknownWeightCount,
+    sourceBuckets: [...sourceBucketsByBaqueId.values()],
+  };
+}
+
+function buildSortingPasses(plan) {
+  const lowerSide = plan.sourceBuckets
+    .filter((bucket) => bucket.position < plan.targetPosition)
+    .sort((left, right) => left.position - right.position);
+  const upperSide = plan.sourceBuckets
+    .filter((bucket) => bucket.position > plan.targetPosition)
+    .sort((left, right) => right.position - left.position);
+  const lowerSummary = summarizeSortingSide(lowerSide);
+  const upperSummary = summarizeSortingSide(upperSide);
+  const sideOrder = [];
+
+  if (lowerSide.length && upperSide.length) {
+    if (upperSummary.effort > lowerSummary.effort) {
+      sideOrder.push(upperSide, lowerSide);
+    } else {
+      sideOrder.push(lowerSide, upperSide);
+    }
+  } else if (lowerSide.length) {
+    sideOrder.push(lowerSide);
+  } else if (upperSide.length) {
+    sideOrder.push(upperSide);
+  }
+
+  return sideOrder.map((sideBuckets) => {
+    const summary = summarizeSortingSide(sideBuckets);
+    const routeNames = [...sideBuckets.map((bucket) => bucket.baqueName), plan.targetBaque.name];
+
+    return {
+      routeLabel: routeNames.join(" -> "),
+      movedCount: summary.movedCount,
+      totalWeightKg: summary.totalWeightKg,
+      unknownWeightCount: summary.unknownWeightCount,
+      advice: getSortingHandlingAdvice(summary),
+    };
+  });
+}
+
+function summarizeSortingSide(sideBuckets) {
+  return sideBuckets.reduce((summary, bucket) => ({
+    movedCount: summary.movedCount + bucket.movedCount,
+    totalWeightKg: summary.totalWeightKg + bucket.totalWeightKg,
+    unknownWeightCount: summary.unknownWeightCount + bucket.unknownWeightCount,
+    heaviestParcelKg: Math.max(summary.heaviestParcelKg, bucket.heaviestParcelKg),
+    effort: summary.effort + bucket.effort,
+  }), {
+    movedCount: 0,
+    totalWeightKg: 0,
+    unknownWeightCount: 0,
+    heaviestParcelKg: 0,
+    effort: 0,
+  });
+}
+
+function orderSortingPlans(plans) {
+  const remaining = [...plans];
+  const orderedPlans = [];
+  let currentPosition = 1;
+
+  while (remaining.length) {
+    remaining.sort((left, right) => {
+      const travelDiff = Math.abs(left.targetPosition - currentPosition) - Math.abs(right.targetPosition - currentPosition);
+      if (travelDiff !== 0) {
+        return travelDiff;
+      }
+
+      const weightDiff = right.totalMoveWeightKg - left.totalMoveWeightKg;
+      if (weightDiff !== 0) {
+        return weightDiff;
+      }
+
+      const movedDiff = right.movedCount - left.movedCount;
+      if (movedDiff !== 0) {
+        return movedDiff;
+      }
+
+      return left.totalEffort - right.totalEffort;
+    });
+
+    const nextPlan = remaining.shift();
+    orderedPlans.push(nextPlan);
+    currentPosition = nextPlan.targetPosition;
+  }
+
+  return orderedPlans;
 }
 
 function renderDestinationRules() {
@@ -622,6 +936,13 @@ function renderDestinationRules() {
                 <option value="all" ${rule.matchMode === "all" ? "selected" : ""}>Tous les mots-cles</option>
               </select>
             </label>
+
+            <label class="field">
+              <span>Baque cible</span>
+              <select data-field="preferredBaqueId" data-rule-id="${escapeHtml(rule.id)}" aria-label="Baque cible">
+                ${buildBaqueTargetOptions(rule.preferredBaqueId || "")}
+              </select>
+            </label>
           </div>
 
           <label class="field">
@@ -644,8 +965,31 @@ function renderDestinationRules() {
     .join("");
 }
 
+function renderDestinationRuleTargetOptions() {
+  if (!ui.destinationRuleTargetBaqueSelect) {
+    return;
+  }
+
+  const previousValue = ui.destinationRuleTargetBaqueSelect.value;
+  ui.destinationRuleTargetBaqueSelect.innerHTML = buildBaqueTargetOptions(previousValue);
+  ui.destinationRuleTargetBaqueSelect.value = hasBaqueId(previousValue) ? previousValue : "";
+}
+
+function buildBaqueTargetOptions(selectedBaqueId = "") {
+  return [
+    `<option value="" ${!selectedBaqueId ? "selected" : ""}>Calcul automatique</option>`,
+    ...getOrderedBaquesForLayout().map(
+      (baque) => `
+        <option value="${escapeHtml(baque.id)}" ${baque.id === selectedBaqueId ? "selected" : ""}>
+          ${escapeHtml(baque.name)}
+        </option>
+      `,
+    ),
+  ].join("");
+}
+
 function renderBaques() {
-  ui.baquesGrid.innerHTML = state.baques
+  ui.baquesGrid.innerHTML = getOrderedBaquesForLayout()
     .map((baque) => {
       const parcels = getParcelsForBaque(baque.id);
 
@@ -690,7 +1034,7 @@ function renderBaques() {
 }
 
 function parcelTemplate(parcel) {
-  const options = state.baques
+  const options = getOrderedBaquesForLayout()
     .map(
       (baque) => `
         <option value="${escapeHtml(baque.id)}" ${baque.id === parcel.currentBaqueId ? "selected" : ""}>
@@ -959,6 +1303,7 @@ function handleDestinationRuleSubmit(event) {
 
   const label = normalizeFreeText(ui.destinationRuleLabelInput.value);
   const matchMode = normalizeDestinationRuleMatchMode(ui.destinationRuleMatchModeSelect.value);
+  const preferredBaqueId = normalizeDestinationRuleTargetBaqueId(ui.destinationRuleTargetBaqueSelect.value);
   const patterns = parseDestinationRulePatterns(ui.destinationRulePatternsInput.value);
 
   if (!label || !patterns.length) {
@@ -970,6 +1315,7 @@ function handleDestinationRuleSubmit(event) {
     id: createId(),
     label,
     matchMode,
+    preferredBaqueId,
     patterns,
     createdAt: new Date().toISOString(),
   });
@@ -978,6 +1324,7 @@ function handleDestinationRuleSubmit(event) {
   render();
   ui.destinationRuleForm.reset();
   ui.destinationRuleMatchModeSelect.value = "any";
+  ui.destinationRuleTargetBaqueSelect.value = "";
   showToast(`Regle "${label}" ajoutee.`);
 }
 
@@ -995,6 +1342,7 @@ function handleDestinationSummaryClick(event) {
   ui.destinationRuleLabelInput.value = label;
   ui.destinationRulePatternsInput.value = label;
   ui.destinationRuleMatchModeSelect.value = "any";
+  ui.destinationRuleTargetBaqueSelect.value = "";
   ui.destinationRuleLabelInput.focus();
   showToast("Regle pre-remplie. Ajustez-la puis enregistrez.");
 }
@@ -1039,6 +1387,10 @@ function handleDestinationRulesChange(event) {
 
   if (field === "matchMode") {
     rule.matchMode = normalizeDestinationRuleMatchMode(input.value);
+  }
+
+  if (field === "preferredBaqueId") {
+    rule.preferredBaqueId = normalizeDestinationRuleTargetBaqueId(input.value);
   }
 
   if (field === "patterns") {
@@ -2594,6 +2946,32 @@ function getRuleMatchedDestinationLabels(rule) {
   )].sort((left, right) => left.localeCompare(right, "fr", { numeric: true, sensitivity: "base" }));
 }
 
+function getOrderedBaquesForLayout() {
+  return [...state.baques].sort((left, right) => {
+    const orderDiff = getBaqueLayoutOrder(left) - getBaqueLayoutOrder(right);
+    if (orderDiff !== 0) {
+      return orderDiff;
+    }
+
+    return left.name.localeCompare(right.name, "fr", { numeric: true, sensitivity: "base" });
+  });
+}
+
+function getBaqueLayoutOrder(baque) {
+  const numericHint = extractBaqueLayoutHint(baque?.name || "");
+  if (numericHint !== null) {
+    return numericHint;
+  }
+
+  const creationIndex = state.baques.findIndex((item) => item.id === baque?.id);
+  return creationIndex >= 0 ? creationIndex + 1 : Number.MAX_SAFE_INTEGER;
+}
+
+function extractBaqueLayoutHint(value) {
+  const match = String(value).match(/(\d{1,3})/);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
 function createId() {
   if (window.crypto?.randomUUID) {
     return window.crypto.randomUUID();
@@ -2629,6 +3007,7 @@ function normalizeDestinationRule(rule) {
     id: String(rule.id || createId()),
     label,
     matchMode: normalizeDestinationRuleMatchMode(rule.matchMode),
+    preferredBaqueId: normalizeDestinationRuleTargetBaqueId(rule.preferredBaqueId || ""),
     patterns,
     createdAt: rule.createdAt || new Date().toISOString(),
   };
@@ -2636,6 +3015,15 @@ function normalizeDestinationRule(rule) {
 
 function normalizeDestinationRuleMatchMode(value) {
   return value === "all" ? "all" : "any";
+}
+
+function normalizeDestinationRuleTargetBaqueId(value) {
+  const baqueId = String(value || "").trim();
+  return hasBaqueId(baqueId) ? baqueId : "";
+}
+
+function hasBaqueId(baqueId) {
+  return state.baques.some((baque) => baque.id === baqueId);
 }
 
 function parseDestinationRulePatterns(value) {
@@ -2876,6 +3264,94 @@ function renderRouteCodeMeta(parcels) {
 
 function normalizeBarcode(value) {
   return value.trim();
+}
+
+function parseParcelWeightKg(parcel) {
+  const rawWeight = typeof parcel === "string" ? parcel : parcel?.weight || "";
+  const match = String(rawWeight).match(/(\d+(?:[.,]\d+)?)/);
+  if (!match) {
+    return null;
+  }
+
+  const parsedWeight = Number.parseFloat(match[1].replace(",", "."));
+  return Number.isFinite(parsedWeight) ? parsedWeight : null;
+}
+
+function getParcelHandlingFactor(weightKg) {
+  if (weightKg === null) {
+    return 1.2;
+  }
+
+  if (weightKg >= 40) {
+    return 4.5;
+  }
+
+  if (weightKg >= 25) {
+    return 3.5;
+  }
+
+  if (weightKg >= 15) {
+    return 2;
+  }
+
+  if (weightKg >= 5) {
+    return 1.25;
+  }
+
+  return 1;
+}
+
+function getSortingEffortLabel(totalEffort) {
+  if (totalEffort >= 18) {
+    return "Effort soutenu";
+  }
+
+  if (totalEffort >= 8) {
+    return "Effort moyen";
+  }
+
+  return "Effort leger";
+}
+
+function getSortingHandlingAdvice(summary) {
+  if (summary.heaviestParcelKg >= 35 || summary.totalWeightKg >= 120) {
+    return "Utiliser un chariot ou faire plusieurs depots courts";
+  }
+
+  if (summary.heaviestParcelKg >= 25) {
+    return "Traiter les colis lourds un par un";
+  }
+
+  if (summary.totalWeightKg <= 15 && summary.movedCount > 1 && !summary.unknownWeightCount) {
+    return "Collecte groupee possible";
+  }
+
+  if (summary.unknownWeightCount) {
+    return "Verifier le poids avant de prendre plusieurs colis";
+  }
+
+  return "Avancer baque par baque vers la cible";
+}
+
+function formatKnownWeightSummary(totalWeightKg, unknownWeightCount = 0) {
+  const roundedWeight = Number(totalWeightKg || 0);
+  const formattedWeight = roundedWeight > 0
+    ? `${roundedWeight.toLocaleString("fr-FR", { minimumFractionDigits: roundedWeight < 100 ? 1 : 0, maximumFractionDigits: 1 })} kg`
+    : "";
+
+  if (formattedWeight && unknownWeightCount) {
+    return `${formattedWeight} + ${unknownWeightCount} poids inconnus`;
+  }
+
+  if (formattedWeight) {
+    return formattedWeight;
+  }
+
+  if (unknownWeightCount) {
+    return `${unknownWeightCount} poids inconnus`;
+  }
+
+  return "Poids non renseigne";
 }
 
 function normalizeCommandNumber(value) {
