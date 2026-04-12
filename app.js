@@ -464,11 +464,20 @@ function render() {
   renderDestinationRuleTargetOptions();
   renderDestinationRules();
   renderDestinationSummary();
-  renderSortingPlan();
-  renderBaques();
+  safelyRenderSection(renderSortingPlan, renderSortingPlanFallback);
+  safelyRenderSection(renderBaques, renderBaquesFallback);
   renderSearchResults();
   renderDeliveryNotes();
   applyCollapseStateToDom();
+}
+
+function safelyRenderSection(renderSection, fallbackRender) {
+  try {
+    renderSection();
+  } catch (error) {
+    console.error("Erreur de rendu", renderSection?.name || "section", error);
+    fallbackRender?.(error);
+  }
 }
 
 function renderHeroStats() {
@@ -642,6 +651,64 @@ function renderSortingPlan() {
       `;
     })
     .join("");
+}
+
+function renderSortingPlanFallback() {
+  if (!ui.sortingPlan) {
+    return;
+  }
+
+  const fallbackPlans = buildFallbackSortingPlans();
+  if (!fallbackPlans.length) {
+    ui.sortingPlan.innerHTML = `
+      <article class="empty-card">
+        <p class="empty-state">Le plan de tri apparaitra ici des qu'une destination sera repartie sur plusieurs baques.</p>
+      </article>
+    `;
+    return;
+  }
+
+  ui.sortingPlan.innerHTML = fallbackPlans
+    .map((plan) => `
+      <article class="sorting-plan-card">
+        <div class="sorting-plan-card__top">
+          <div>
+            <p class="section-kicker">Plan simplifie</p>
+            <h4>${escapeHtml(plan.label)}</h4>
+          </div>
+          <span class="tag">Repli</span>
+        </div>
+        <div class="document-summary">
+          <span class="distribution-chip">Baque cible : ${escapeHtml(plan.targetBaqueName)}</span>
+          <span class="distribution-chip">${escapeHtml(String(plan.movedCount))} colis a deplacer</span>
+        </div>
+        <p class="field-help">${escapeHtml(plan.routeLabel)}</p>
+      </article>
+    `)
+    .join("");
+}
+
+function buildFallbackSortingPlans() {
+  return getDestinationGroups()
+    .map((group) => {
+      const distribution = group.distribution || [];
+      if (distribution.length < 2) {
+        return null;
+      }
+
+      const target = distribution[0];
+      if (!target) {
+        return null;
+      }
+
+      return {
+        label: group.label,
+        targetBaqueName: target[0],
+        movedCount: group.parcels.length - target[1],
+        routeLabel: [...distribution.map(([baqueName]) => baqueName), target[0]].join(" -> "),
+      };
+    })
+    .filter((plan) => plan && plan.movedCount > 0);
 }
 
 function getSortingPlans() {
@@ -998,6 +1065,10 @@ function buildBaqueTargetOptions(selectedBaqueId = "") {
 }
 
 function renderBaques() {
+  if (!ui.baquesGrid) {
+    return;
+  }
+
   const baques = getOrderedBaquesForLayout();
   if (!baques.length) {
     ui.baquesGrid.innerHTML = `
@@ -1010,6 +1081,39 @@ function renderBaques() {
 
   ui.baquesGrid.innerHTML = baques
     .map((baque) => renderBaqueCard(baque))
+    .join("");
+}
+
+function renderBaquesFallback() {
+  if (!ui.baquesGrid) {
+    return;
+  }
+
+  const baques = getOrderedBaquesForLayout();
+  if (!baques.length) {
+    ui.baquesGrid.innerHTML = `
+      <article class="empty-card">
+        <p class="empty-state">Aucune baque disponible.</p>
+      </article>
+    `;
+    return;
+  }
+
+  ui.baquesGrid.innerHTML = baques
+    .map((baque) => {
+      const parcels = getParcelsForBaque(baque.id);
+      return `
+        <article class="baque-card" data-baque-id="${escapeHtml(baque.id)}">
+          <div class="baque-card__top">
+            <div class="baque-card__status">
+              <span class="count-pill">${escapeHtml(String(parcels.length))} colis</span>
+            </div>
+            <p class="parcel-code">${escapeHtml(baque.name)}</p>
+            <p class="parcel-meta">${escapeHtml(baque.location)}</p>
+          </div>
+        </article>
+      `;
+    })
     .join("");
 }
 
