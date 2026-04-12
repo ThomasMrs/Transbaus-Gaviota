@@ -3279,10 +3279,20 @@ function parseDestinationRulePatterns(value) {
   const rawValues = Array.isArray(value)
     ? value
     : String(value || "")
-      .replaceAll(",", "\n")
+      .replace(/,/g, "\n")
       .split("\n");
 
-  return [...new Set(rawValues.map((entry) => normalizeDestinationRuleText(entry)).filter(Boolean))];
+  return [...new Set(rawValues.map((entry) => normalizeDestinationRulePattern(entry)).filter(Boolean))];
+}
+
+function normalizeDestinationRulePattern(value) {
+  const rawValue = normalizeFreeText(String(value || ""));
+  const directPostalCode = rawValue.match(/^\d{5}$/)?.[0];
+  if (directPostalCode) {
+    return directPostalCode;
+  }
+
+  return normalizeDestinationRuleText(rawValue);
 }
 
 function normalizeDestinationRuleText(value) {
