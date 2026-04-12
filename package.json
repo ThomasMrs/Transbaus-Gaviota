@@ -4,7 +4,9 @@
   "description": "Application web de tri de colis pour TransBaus / Gaviota.",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "lint": "eslint .",
+    "test": "node --test",
+    "check": "npm run lint && npm run test"
   },
   "repository": {
     "type": "git",
@@ -17,5 +19,10 @@
   "bugs": {
     "url": "https://github.com/ThomasMrs/Transbaus-Gaviota/issues"
   },
-  "homepage": "https://github.com/ThomasMrs/Transbaus-Gaviota#readme"
+  "homepage": "https://github.com/ThomasMrs/Transbaus-Gaviota#readme",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.2.0",
+    "globals": "^17.5.0"
+  }
 }

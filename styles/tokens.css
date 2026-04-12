@@ -1,0 +1,64 @@
+:root {
+  --bg: #f3f7fb;
+  --surface: rgba(255, 255, 255, 0.88);
+  --surface-strong: #ffffff;
+  --text: #16324a;
+  --text-soft: #506578;
+  --line: rgba(22, 50, 74, 0.12);
+  --primary: #9ac8eb;
+  --primary-strong: #5f9dc8;
+  --primary-deep: #254d73;
+  --accent: #f1b39d;
+  --danger: #c85e52;
+  --danger-soft: #ffe2dd;
+  --shadow: 0 24px 60px rgba(36, 78, 115, 0.12);
+  --radius-xl: 28px;
+  --radius-lg: 22px;
+  --radius-md: 16px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Manrope", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(154, 200, 235, 0.5), transparent 26%),
+    radial-gradient(circle at top right, rgba(241, 179, 157, 0.34), transparent 18%),
+    linear-gradient(180deg, #eff6fb 0%, #f8fbff 40%, #eef4f9 100%);
+}
+
+body.app-locked {
+  overflow: hidden;
+}
+
+body.app-locked .page-shell,
+body.app-locked .toast-zone,
+body.app-locked .modal {
+  visibility: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+code {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(36, 78, 115, 0.08);
+}

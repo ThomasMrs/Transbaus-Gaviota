@@ -64,6 +64,19 @@ http://localhost:4173
 
 Le scan camera fonctionne mieux via `localhost` que via l'ouverture directe de `index.html`.
 
+## Verifications locales
+
+Le projet dispose maintenant d'une verification minimale :
+
+```powershell
+npm run check
+```
+
+Cela lance :
+
+- `npm run lint` pour verifier le JavaScript modulaire
+- `npm run test` pour verifier les parseurs et normalisations metier
+
 ## Mise en ligne sur GitHub Pages
 
 Le depot contient un workflow GitHub Pages dans `.github/workflows/pages.yml`.
@@ -100,8 +113,22 @@ Important :
 .
 |-- .github/workflows/pages.yml
 |-- assets/
+|-- src/
+|   |-- delivery-notes.mjs
+|   |-- label-parser.mjs
+|   |-- parcel-utils.mjs
+|   `-- shared.mjs
+|-- styles/
+|   |-- components.css
+|   |-- forms.css
+|   |-- modals.css
+|   |-- responsive.css
+|   |-- shell.css
+|   `-- tokens.css
+|-- tests/
 |-- vendor/
 |-- app.js
+|-- eslint.config.mjs
 |-- index.html
 |-- serve-local.ps1
 |-- styles.css

@@ -1,0 +1,131 @@
+@media (max-width: 1100px) {
+  .hero,
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-bar__logout {
+    width: 100%;
+  }
+
+  .brand-mark--gaviota {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 760px) {
+  .page-shell {
+    width: min(100% - 20px, 1280px);
+    padding-top: 14px;
+  }
+
+  .login-panel {
+    padding: 24px;
+  }
+
+  .brand-bar {
+    padding: 16px;
+  }
+
+  .brand-mark {
+    min-height: auto;
+    padding: 12px 14px;
+  }
+
+  .hero__copy,
+  .panel,
+  .baque-card,
+  .modal__dialog {
+    padding: 18px;
+  }
+
+  .hero__stats {
+    grid-template-columns: 1fr;
+  }
+
+  .collapse-toggle {
+    display: inline-flex;
+  }
+
+  .panel--collapsible > .section-head,
+  .section-block--collapsible > .section-head,
+  .panel--highlight.panel--collapsible > .hero__side-head {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .panel--collapsible > .section-head .section-head__actions {
+    flex-direction: row;
+    align-items: center;
+    margin-left: auto;
+  }
+
+  .panel--collapsible.is-collapsed .section-head,
+  .panel--collapsible.is-collapsed .hero__side-head,
+  .section-block--collapsible.is-collapsed .section-head {
+    margin-bottom: 0;
+  }
+
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .capture-stack {
+    grid-template-columns: 1fr;
+  }
+
+  .capture-card__actions {
+    grid-template-columns: 1fr;
+  }
+
+  .section-head,
+  .section-head__actions,
+  .hero__side-head,
+  .destination-card__top,
+  .sorting-plan-card__top,
+  .sorting-pass__head,
+  .sorting-pass__meta,
+  .destination-rule-card__top,
+  .baque-card__meta,
+  .parcel-item__top,
+  .parcel-item__bottom,
+  .document-card,
+  .modal__header,
+  .actions,
+  .move-group {
+    flex-direction: column;
+  }
+
+  .btn,
+  .icon-btn {
+    width: 100%;
+  }
+
+  .brand-logo--transbaus,
+  .brand-logo--gaviota {
+    max-height: 42px;
+  }
+
+  .capture-preview {
+    aspect-ratio: 4 / 3;
+    max-height: min(46dvh, 380px);
+  }
+
+  .capture-guide--label {
+    inset: 10% 6% 14%;
+  }
+
+  .capture-guide--barcode {
+    inset: 39% 8%;
+  }
+
+  .tag {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+  }
+}
