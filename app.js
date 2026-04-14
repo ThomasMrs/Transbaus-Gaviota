@@ -43,7 +43,7 @@ const STORAGE_KEY = "transbaus-gaviota-state-v1";
 const COLLAPSE_STORAGE_KEY = "le-baus-du-tri-collapse-v1";
 const ACCESS_STORAGE_KEY = "transbaus-gaviota-access-v1";
 const ACCESS_RATE_LIMIT_STORAGE_KEY = "transbaus-gaviota-access-rate-v1";
-const ACCESS_PASSWORD = "2005";
+const ACCESS_PASSWORD_HASH_SHA256 = "a20a2b7bb0842d5cf8a0c06c626421fd51ec103925c1819a51271f2779afa730";
 const ACCESS_FAILED_ATTEMPTS_LIMIT = 3;
 const ACCESS_LOCK_DURATION_MS = 10_000;
 const PDF_DB_NAME = "le-baus-du-tri-documents-v1";
@@ -218,30 +218,43 @@ function syncAccessGate() {
   setAppAccess(hasStoredAccess());
 }
 
-function handleLoginSubmit(event) {
+async function handleLoginSubmit(event) {
   event.preventDefault();
 
-  refreshAccessRateLimit();
-  if (isAccessTemporarilyLocked()) {
-    syncAccessRateLimitUi();
-    return;
-  }
-
-  const typedPassword = ui.loginPasswordInput.value.trim();
-  if (typedPassword !== ACCESS_PASSWORD) {
-    registerFailedLoginAttempt();
-    if (!isAccessTemporarilyLocked()) {
-      ui.loginPasswordInput.focus();
-      ui.loginPasswordInput.select();
+  try {
+    refreshAccessRateLimit();
+    if (isAccessTemporarilyLocked()) {
+      syncAccessRateLimitUi();
+      return;
     }
-    return;
-  }
 
-  resetAccessRateLimit();
-  window.localStorage.setItem(ACCESS_STORAGE_KEY, "granted");
-  ui.loginStatus.textContent = "";
-  ui.loginForm.reset();
-  setAppAccess(true);
+    const typedPassword = ui.loginPasswordInput.value.trim();
+    const typedPasswordHash = await hashAccessPassword(typedPassword);
+    if (!typedPasswordHash) {
+      ui.loginStatus.textContent = "Impossible de verifier le code sur ce navigateur. Utilisez localhost/https.";
+      showToast("Verification du code impossible sur ce navigateur.", "danger");
+      return;
+    }
+
+    if (typedPasswordHash !== ACCESS_PASSWORD_HASH_SHA256) {
+      registerFailedLoginAttempt();
+      if (!isAccessTemporarilyLocked()) {
+        ui.loginPasswordInput.focus();
+        ui.loginPasswordInput.select();
+      }
+      return;
+    }
+
+    resetAccessRateLimit();
+    window.localStorage.setItem(ACCESS_STORAGE_KEY, "granted");
+    ui.loginStatus.textContent = "";
+    ui.loginForm.reset();
+    setAppAccess(true);
+  } catch (error) {
+    console.error("Connexion impossible", error);
+    ui.loginStatus.textContent = "Connexion impossible. Rechargez la page puis reessayez.";
+    showToast("Connexion impossible. Rechargez la page puis reessayez.", "danger");
+  }
 }
 
 function handleLogoutClick() {
@@ -393,6 +406,18 @@ function formatAccessLockMessage() {
 
 function isAccessLockMessage(value) {
   return /^Trop d'essais rates\./.test(value);
+}
+
+async function hashAccessPassword(value) {
+  if (typeof globalThis.crypto?.subtle?.digest !== "function" || typeof TextEncoder !== "function") {
+    return "";
+  }
+
+  const data = new TextEncoder().encode(String(value || ""));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function loadState() {
@@ -1247,22 +1272,37 @@ function parcelTemplate(parcel) {
     .join("");
   const displayDestination = getParcelDestinationDisplay(parcel);
   const displayRouteCode = formatRouteCodeForDisplay(parcel.routeCode);
+
+  const primaryLines = [
+    displayDestination ? `Destination : <strong>${escapeHtml(displayDestination)}</strong>` : "",
+    parcel.client ? `Client : ${escapeHtml(parcel.client)}` : "",
+    parcel.packageIndex ? `Colis : ${escapeHtml(parcel.packageIndex)}` : "",
+    parcel.weight ? `Poids : ${escapeHtml(parcel.weight)}` : "",
+  ]
+    .filter(Boolean)
+    .join("<br>");
+
   const detailLines = [
-    `Destination <strong>${escapeHtml(displayDestination)}</strong>`,
     parcel.commandNumber ? `Numero de commande : ${escapeHtml(parcel.commandNumber)}` : "",
     parcel.barcode && parcel.barcode !== parcel.commandNumber ? `Code-barres : ${escapeHtml(parcel.barcode)}` : "",
-    parcel.client ? `Client : ${escapeHtml(parcel.client)}` : "",
     parcel.routeCode ? `Numero destination : ${escapeHtml(displayRouteCode)}` : "",
     parcel.routeLabel ? `Route : ${escapeHtml(parcel.routeLabel)}` : "",
     parcel.reference ? `Reference : ${escapeHtml(parcel.reference)}` : "",
-    parcel.packageIndex ? `Colis : ${escapeHtml(parcel.packageIndex)}` : "",
-    parcel.weight ? `Poids : ${escapeHtml(parcel.weight)}` : "",
     parcel.shippingDate ? `Date : ${escapeHtml(parcel.shippingDate)}` : "",
     `Origine : ${escapeHtml(getOriginLabel(parcel))}`,
     `Derniere mise a jour : ${escapeHtml(formatDate(parcel.updatedAt || parcel.createdAt))}`,
   ]
     .filter(Boolean)
     .join("<br>");
+
+  const detailsMarkup = detailLines
+    ? `
+      <details class="parcel-details">
+        <summary>Plus d'infos</summary>
+        <p class="parcel-meta parcel-meta--details">${detailLines}</p>
+      </details>
+    `
+    : "";
   const tagLabel = displayRouteCode || getDestinationShortLabel(displayDestination) || "Colis";
   const parcelHeading = getParcelIdentifier(parcel);
 
@@ -1271,7 +1311,8 @@ function parcelTemplate(parcel) {
       <div class="parcel-item__top">
         <div>
           <p class="parcel-code">${escapeHtml(parcelHeading)}</p>
-          <p class="parcel-meta">${detailLines}</p>
+          <p class="parcel-meta">${primaryLines}</p>
+          ${detailsMarkup}
         </div>
         <span class="tag">${escapeHtml(tagLabel)}</span>
       </div>
@@ -2133,7 +2174,59 @@ async function handleLabelImageChange(event) {
 }
 
 async function processLabelFile(file) {
-  if (!file) {
+  await processLabelFiles([file]);
+}
+
+function scoreParsedLabel(parsed) {
+  if (!parsed || typeof parsed !== "object") {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  let score = 0;
+  if (normalizeRouteCode(parsed.routeCode || "")) {
+    score += 140;
+  }
+
+  if (getParcelCommandNumber(parsed)) {
+    score += 60;
+  }
+
+  if (normalizeDestination(parsed.destination || "")) {
+    score += 40;
+  }
+
+  if (normalizeFreeText(parsed.client || "")) {
+    score += 18;
+  }
+
+  if (normalizeFreeText(parsed.reference || "")) {
+    score += 8;
+  }
+
+  if (normalizeFreeText(parsed.weight || "")) {
+    score += 6;
+  }
+
+  if (normalizeFreeText(parsed.packageIndex || "")) {
+    score += 6;
+  }
+
+  if (normalizeBarcode(parsed.barcode || "")) {
+    score += 3;
+  }
+
+  return score;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+async function processLabelFiles(files) {
+  const candidates = (Array.isArray(files) ? files : [files]).filter(Boolean);
+  if (!candidates.length) {
     return;
   }
 
@@ -2148,20 +2241,50 @@ async function processLabelFile(file) {
     ui.ocrStatus.textContent = "Analyse de l'etiquette en cours...";
 
     const worker = await getOcrWorker();
-    const result = await worker.recognize(file);
-    const parsed = parseLabelText(result.data.text);
+    let bestParsed = null;
+    let bestScore = Number.NEGATIVE_INFINITY;
+    let lastError = null;
 
-    applyParsedLabelData(parsed);
+    for (let index = 0; index < candidates.length; index += 1) {
+      const file = candidates[index];
+      ui.ocrStatus.textContent = candidates.length > 1
+        ? `Analyse de l'etiquette (${index + 1}/${candidates.length})...`
+        : "Analyse de l'etiquette en cours...";
 
-    if (!parsed.routeCode) {
-      ui.ocrStatus.textContent = "Lecture terminee, mais peu d'informations ont ete reconnues. Reprenez une photo plus nette.";
+      try {
+        const result = await worker.recognize(file);
+        const parsed = parseLabelText(result?.data?.text || "");
+        const score = scoreParsedLabel(parsed);
+        if (score > bestScore) {
+          bestParsed = parsed;
+          bestScore = score;
+        }
+
+        if (parsed.routeCode) {
+          break;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (bestParsed) {
+      applyParsedLabelData(bestParsed);
+    }
+
+    if (!bestParsed?.routeCode) {
+      ui.ocrStatus.textContent = "Lecture terminee, mais le numero destination est introuvable. Essayez une photo plus nette.";
       showToast("Numero destination introuvable. Essayez une photo plus nette.", "danger");
+      if (lastError) {
+        console.error("OCR etiquette impossible", lastError);
+      }
       return;
     }
 
     ui.ocrStatus.textContent = "Etiquette analysee. Verifiez les champs puis enregistrez le colis.";
     showToast("Etiquette analysee. Les informations ont ete remplies.");
   } catch (error) {
+    console.error("OCR etiquette impossible", error);
     ui.ocrStatus.textContent = "Impossible de lire l'etiquette. Essayez une photo bien droite et nette.";
     showToast("Impossible de lire l'etiquette. Reessayez avec une photo plus nette.", "danger");
   } finally {
@@ -2194,7 +2317,7 @@ async function openCaptureModal(mode) {
   try {
     await startCaptureStream();
     ui.captureStatus.textContent = mode === "label"
-      ? "Cadrez l'etiquette dans le rectangle, puis prenez la photo."
+      ? "Visez l'etiquette, meme approximativement. La capture peut se faire automatiquement."
       : "Centrez le code-barres dans le rectangle, puis prenez la photo.";
   } catch (error) {
     await closeCaptureModal({ silent: true });
@@ -2207,7 +2330,7 @@ function configureCaptureModal(mode) {
 
   ui.captureTitle.textContent = isLabelMode ? "Cadrer l'etiquette" : "Cadrer le code-barres";
   ui.captureHint.textContent = isLabelMode
-    ? "Placez l'etiquette entiere dans le cadre. La photo se prend des qu'elle est detectee."
+    ? "Visez l'etiquette rapidement. L'app capture et reessaie si besoin."
     : "Placez le code-barres au centre du cadre, evitez les reflets, puis prenez la photo.";
   ui.takeCaptureBtn.textContent = isLabelMode ? "Prendre maintenant" : "Prendre la photo";
   ui.captureGuide.classList.toggle("capture-guide--label", isLabelMode);
@@ -2281,13 +2404,15 @@ async function handleCapturePhoto(options = {}) {
   const mode = captureSession.mode;
 
   try {
-    const file = await captureCurrentFrame(mode);
+    const files = mode === "label"
+      ? await captureLabelBurst()
+      : [await captureCurrentFrame(mode)];
     await closeCaptureModal({ force: true, silent: true });
 
     if (mode === "label") {
-      await processLabelFile(file);
+      await processLabelFiles(files);
     } else {
-      await processBarcodeFile(file);
+      await processBarcodeFile(files[0]);
     }
   } catch (error) {
     ui.captureStatus.textContent = "Impossible de prendre la photo. Reessayez avec une image plus stable.";
@@ -2509,6 +2634,21 @@ function buildAutoCaptureStatusMessage(metrics) {
   return "Etiquette detectee. Capture imminente...";
 }
 
+async function captureLabelBurst() {
+  const burstCount = 3;
+  const burstIntervalMs = 140;
+  const captured = [];
+
+  for (let index = 0; index < burstCount; index += 1) {
+    if (index) {
+      await delay(burstIntervalMs);
+    }
+    captured.push(await captureCurrentFrame("label"));
+  }
+
+  return captured;
+}
+
 async function captureCurrentFrame(mode) {
   const crop = getCaptureCropArea(mode);
   const canvas = document.createElement("canvas");
@@ -2520,6 +2660,11 @@ async function captureCurrentFrame(mode) {
 
   canvas.width = Math.max(1, Math.round(crop.width));
   canvas.height = Math.max(1, Math.round(crop.height));
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  if (mode === "label") {
+    context.filter = "grayscale(1) contrast(1.35) brightness(1.06)";
+  }
   context.drawImage(
     ui.captureVideo,
     crop.x,
@@ -2531,6 +2676,7 @@ async function captureCurrentFrame(mode) {
     canvas.width,
     canvas.height,
   );
+  context.filter = "none";
 
   const blob = await new Promise((resolve, reject) => {
     canvas.toBlob(
@@ -2572,7 +2718,7 @@ function getCaptureCropArea(mode) {
   let width = guideRect.width / scale;
   let height = guideRect.height / scale;
 
-  const extraMargin = mode === "label" ? 0.04 : 0.1;
+  const extraMargin = mode === "label" ? 0.12 : 0.1;
   x -= width * extraMargin;
   y -= height * extraMargin;
   width *= 1 + extraMargin * 2;
