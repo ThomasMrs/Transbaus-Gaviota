@@ -46,6 +46,11 @@ const ACCESS_RATE_LIMIT_STORAGE_KEY = "transbaus-gaviota-access-rate-v1";
 const ACCESS_PASSWORD_HASH_SHA256 = "a20a2b7bb0842d5cf8a0c06c626421fd51ec103925c1819a51271f2779afa730";
 const ACCESS_FAILED_ATTEMPTS_LIMIT = 3;
 const ACCESS_LOCK_DURATION_MS = 10_000;
+const LABEL_AUTO_CAPTURE_POLL_MS = 220;
+const LABEL_AUTO_CAPTURE_STABLE_FRAMES = 7;
+const LABEL_AUTO_CAPTURE_KICKOFF_MS = 650;
+const LABEL_BURST_COUNT = 5;
+const LABEL_BURST_INTERVAL_MS = 320;
 const PDF_DB_NAME = "le-baus-du-tri-documents-v1";
 const PDF_STORE_NAME = "delivery-notes";
 const PDFJS_SCRIPT_URL = "vendor/pdf.min.js";
@@ -2317,7 +2322,7 @@ async function openCaptureModal(mode) {
   try {
     await startCaptureStream();
     ui.captureStatus.textContent = mode === "label"
-      ? "Visez l'etiquette, meme approximativement. La capture peut se faire automatiquement."
+      ? "Cadrez l'etiquette tranquillement. La capture se lance apres un court maintien."
       : "Centrez le code-barres dans le rectangle, puis prenez la photo.";
   } catch (error) {
     await closeCaptureModal({ silent: true });
@@ -2330,7 +2335,7 @@ function configureCaptureModal(mode) {
 
   ui.captureTitle.textContent = isLabelMode ? "Cadrer l'etiquette" : "Cadrer le code-barres";
   ui.captureHint.textContent = isLabelMode
-    ? "Visez l'etiquette rapidement. L'app capture et reessaie si besoin."
+    ? "Prenez votre temps pour cadrer. Quand l'etiquette reste stable, l'app prend plusieurs photos."
     : "Placez le code-barres au centre du cadre, evitez les reflets, puis prenez la photo.";
   ui.takeCaptureBtn.textContent = isLabelMode ? "Prendre maintenant" : "Prendre la photo";
   ui.captureGuide.classList.toggle("capture-guide--label", isLabelMode);
@@ -2430,7 +2435,7 @@ function startAutoCaptureMonitoring() {
   captureSession.autoTriggered = false;
   captureSession.stableFrameCount = 0;
   captureSession.lastFrameSignature = null;
-  ui.captureStatus.textContent = "Auto actif. Des que l'etiquette est detectee, la photo se prend.";
+  ui.captureStatus.textContent = "Auto actif. Cadrez l'etiquette et gardez-la stable un instant.";
 
   captureSession.autoCaptureTimer = window.setInterval(() => {
     if (captureSession.mode !== "label" || captureSession.busy || captureSession.autoTriggered) {
@@ -2449,21 +2454,40 @@ function startAutoCaptureMonitoring() {
     captureSession.lastFrameSignature = analysis.signature;
 
     if (!analysis.isReady) {
+      captureSession.stableFrameCount = 0;
       setCaptureDetectionState(false);
       ui.captureStatus.textContent = analysis.message;
       return;
     }
 
     setCaptureDetectionState(true);
+
+    if (analysis.motion !== null && analysis.motion > 14) {
+      captureSession.stableFrameCount = 0;
+      ui.captureStatus.textContent = analysis.message;
+      return;
+    }
+
+    captureSession.stableFrameCount += 1;
+
+    if (captureSession.stableFrameCount < LABEL_AUTO_CAPTURE_STABLE_FRAMES) {
+      const remainingFrames = LABEL_AUTO_CAPTURE_STABLE_FRAMES - captureSession.stableFrameCount;
+      const remainingSeconds = Math.max(1, Math.ceil((remainingFrames * LABEL_AUTO_CAPTURE_POLL_MS) / 1000));
+      ui.captureStatus.textContent = remainingSeconds > 1
+        ? `Etiquette detectee. Gardez le telephone stable encore ${remainingSeconds} secondes.`
+        : "Etiquette detectee. Gardez le telephone stable encore un instant.";
+      return;
+    }
+
     captureSession.autoTriggered = true;
-    ui.captureStatus.textContent = "Etiquette detectee. Photo automatique...";
+    ui.captureStatus.textContent = "Etiquette stable. Rafale automatique en preparation...";
     captureSession.autoCaptureKickoffTimer = window.setTimeout(() => {
       captureSession.autoCaptureKickoffTimer = 0;
       if (captureSession.mode === "label" && !captureSession.busy) {
         void handleCapturePhoto({ auto: true });
       }
-    }, 120);
-  }, 180);
+    }, LABEL_AUTO_CAPTURE_KICKOFF_MS);
+  }, LABEL_AUTO_CAPTURE_POLL_MS);
 }
 
 function stopAutoCaptureMonitoring() {
@@ -2628,20 +2652,19 @@ function buildAutoCaptureStatusMessage(metrics) {
   }
 
   if (metrics.motion !== null && metrics.motion > 16) {
-    return "Etiquette detectee. La photo se lance, gardez juste le telephone dans l'axe.";
+    return "Etiquette detectee. Restez bien dans l'axe sans bouger, la rafale arrive.";
   }
 
-  return "Etiquette detectee. Capture imminente...";
+  return "Etiquette detectee. Gardez la position encore un instant.";
 }
 
 async function captureLabelBurst() {
-  const burstCount = 3;
-  const burstIntervalMs = 140;
   const captured = [];
 
-  for (let index = 0; index < burstCount; index += 1) {
+  for (let index = 0; index < LABEL_BURST_COUNT; index += 1) {
+    ui.captureStatus.textContent = `Rafale en cours (${index + 1}/${LABEL_BURST_COUNT})... gardez l'etiquette dans le cadre.`;
     if (index) {
-      await delay(burstIntervalMs);
+      await delay(LABEL_BURST_INTERVAL_MS);
     }
     captured.push(await captureCurrentFrame("label"));
   }
