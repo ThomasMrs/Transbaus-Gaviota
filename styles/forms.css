@@ -9,14 +9,7 @@
 }
 
 .password-field {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-}
-
-.password-field .field-help {
-  grid-column: 1 / -1;
+  position: relative;
 }
 
 .field span {
@@ -49,10 +42,44 @@
   box-shadow: 0 0 0 4px rgba(154, 200, 235, 0.22);
 }
 
+.password-field input {
+  padding-right: 56px;
+}
+
 .password-field__toggle {
-  min-width: 88px;
-  padding-inline: 14px;
-  white-space: nowrap;
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-soft);
+  transform: translateY(-50%);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.password-field__toggle:hover {
+  background: rgba(154, 200, 235, 0.18);
+  color: var(--primary-deep);
+}
+
+.password-field__toggle:focus-visible {
+  outline: none;
+  background: rgba(154, 200, 235, 0.18);
+  color: var(--primary-deep);
+  box-shadow: 0 0 0 4px rgba(154, 200, 235, 0.22);
+}
+
+.password-field__icon {
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
 }
 
 .field textarea {

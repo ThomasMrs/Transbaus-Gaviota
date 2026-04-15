@@ -953,9 +953,18 @@ function syncLoginPasswordVisibility(isVisible) {
     return;
   }
 
+  const showIcon = ui.toggleLoginPasswordBtn.querySelector(".password-field__icon--show");
+  const hideIcon = ui.toggleLoginPasswordBtn.querySelector(".password-field__icon--hide");
   ui.loginPasswordInput.type = isVisible ? "text" : "password";
-  ui.toggleLoginPasswordBtn.textContent = isVisible ? "Masquer" : "Voir";
   ui.toggleLoginPasswordBtn.setAttribute("aria-pressed", String(isVisible));
+  ui.toggleLoginPasswordBtn.setAttribute("aria-label", isVisible ? "Masquer le code" : "Afficher le code");
+  ui.toggleLoginPasswordBtn.setAttribute("title", isVisible ? "Masquer le code" : "Afficher le code");
+  if (showIcon) {
+    showIcon.hidden = isVisible;
+  }
+  if (hideIcon) {
+    hideIcon.hidden = !isVisible;
+  }
 }
 
 function clearLegacyLocalState() {
