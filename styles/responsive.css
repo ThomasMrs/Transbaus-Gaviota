@@ -8,7 +8,12 @@
     grid-template-columns: 1fr;
   }
 
-  .brand-bar__logout {
+  .brand-bar__actions {
+    width: 100%;
+    justify-self: stretch;
+  }
+
+  .brand-bar__actions .btn {
     width: 100%;
   }
 

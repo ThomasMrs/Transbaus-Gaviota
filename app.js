@@ -74,6 +74,7 @@ const DEFAULT_BAQUES = [
   { name: "Baque 4", location: "Zone D" },
 ];
 
+const workspacePage = getWorkspacePageContext();
 const state = createDefaultState();
 const collapseState = loadCollapseState();
 const accessRateLimit = loadAccessRateLimit();
@@ -124,17 +125,87 @@ document.addEventListener("DOMContentLoaded", () => {
 async function initializeApp() {
   cacheElements();
   bindEvents();
+  syncWorkspacePageUi();
   syncAccessGate();
   clearLegacyLocalState();
   syncSharedStateBadge("connecting");
   try {
-    sharedStateStore = createSharedStateStore();
+    sharedStateStore = createSharedStateStore({
+      pageId: workspacePage.id,
+    });
   } catch (error) {
     console.error("Client Supabase indisponible", error);
     markSharedSyncOffline(error);
   }
   await initializeSharedStateSync();
   render();
+}
+
+function getWorkspacePageContext() {
+  const params = new URLSearchParams(globalThis.location?.search || "");
+  const rawPageId = normalizeWorkspacePageId(params.get("page") || "");
+  if (!rawPageId) {
+    return {
+      id: "global",
+      label: "principale",
+      isPrimary: true,
+    };
+  }
+
+  return {
+    id: rawPageId,
+    label: rawPageId.replace(/[-_]+/g, " "),
+    isPrimary: false,
+  };
+}
+
+function normalizeWorkspacePageId(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function syncWorkspacePageUi() {
+  const titleSuffix = workspacePage.isPrimary ? "" : ` - ${workspacePage.label}`;
+  document.title = `Le Baus du Tri${titleSuffix}`;
+
+  if (ui.workspaceBadge) {
+    ui.workspaceBadge.textContent = workspacePage.isPrimary
+      ? "Page principale"
+      : `Page ${workspacePage.label}`;
+  }
+}
+
+function handleNewWorkspaceClick() {
+  const pageId = generateWorkspacePageId();
+  window.open(buildWorkspacePageUrl(pageId), "_blank", "noopener,noreferrer");
+}
+
+function generateWorkspacePageId() {
+  const now = new Date();
+  const datePart = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("");
+  const timePart = [
+    String(now.getHours()).padStart(2, "0"),
+    String(now.getMinutes()).padStart(2, "0"),
+    String(now.getSeconds()).padStart(2, "0"),
+  ].join("");
+  const randomPart = Math.random().toString(36).slice(2, 6);
+  return `page-${datePart}-${timePart}-${randomPart}`;
+}
+
+function buildWorkspacePageUrl(pageId) {
+  const url = new URL(globalThis.location?.href || "http://localhost/");
+  url.pathname = url.pathname.endsWith("/") ? `${url.pathname}index.html` : url.pathname;
+  url.searchParams.set("page", normalizeWorkspacePageId(pageId));
+  url.hash = "";
+  return url.toString();
 }
 
 function cacheElements() {
@@ -144,6 +215,8 @@ function cacheElements() {
   ui.loginStatus = document.querySelector("#loginStatus");
   ui.loginSubmitBtn = ui.loginForm?.querySelector('button[type="submit"]');
   ui.logoutBtn = document.querySelector("#logoutBtn");
+  ui.newWorkspaceBtn = document.querySelector("#newWorkspaceBtn");
+  ui.workspaceBadge = document.querySelector("#workspaceBadge");
   ui.syncStatusBadge = document.querySelector("#syncStatusBadge");
   ui.heroStats = document.querySelector("#heroStats");
   ui.parcelForm = document.querySelector("#parcelForm");
@@ -209,6 +282,7 @@ function bindEvents() {
   document.addEventListener("click", handleCollapseToggle);
   ui.loginForm.addEventListener("submit", handleLoginSubmit);
   ui.logoutBtn.addEventListener("click", handleLogoutClick);
+  ui.newWorkspaceBtn?.addEventListener("click", handleNewWorkspaceClick);
   ui.parcelForm.addEventListener("submit", handleParcelSubmit);
   ui.baqueForm.addEventListener("submit", handleBaqueSubmit);
   ui.searchInput.addEventListener("input", renderSearchResults);

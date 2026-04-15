@@ -63,9 +63,16 @@
   box-shadow: var(--shadow);
 }
 
+.brand-bar__actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-self: end;
+}
+
 .brand-bar__logout {
   align-self: center;
-  justify-self: end;
 }
 
 .brand-mark {
