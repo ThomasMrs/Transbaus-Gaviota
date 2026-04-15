@@ -8,6 +8,17 @@
   gap: 8px;
 }
 
+.password-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.password-field .field-help {
+  grid-column: 1 / -1;
+}
+
 .field span {
   font-weight: 700;
 }
@@ -36,6 +47,12 @@
   outline: none;
   border-color: rgba(95, 157, 200, 0.58);
   box-shadow: 0 0 0 4px rgba(154, 200, 235, 0.22);
+}
+
+.password-field__toggle {
+  min-width: 88px;
+  padding-inline: 14px;
+  white-space: nowrap;
 }
 
 .field textarea {

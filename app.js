@@ -556,6 +556,7 @@ function cacheElements() {
   ui.loginGate = document.querySelector("#loginGate");
   ui.loginForm = document.querySelector("#loginForm");
   ui.loginPasswordInput = document.querySelector("#loginPasswordInput");
+  ui.toggleLoginPasswordBtn = document.querySelector("#toggleLoginPasswordBtn");
   ui.loginStatus = document.querySelector("#loginStatus");
   ui.loginSubmitBtn = ui.loginForm?.querySelector('button[type="submit"]');
   ui.logoutBtn = document.querySelector("#logoutBtn");
@@ -647,6 +648,7 @@ function cacheElements() {
 function bindEvents() {
   document.addEventListener("click", handleCollapseToggle);
   ui.loginForm.addEventListener("submit", handleLoginSubmit);
+  ui.toggleLoginPasswordBtn?.addEventListener("click", toggleLoginPasswordVisibility);
   ui.logoutBtn.addEventListener("click", handleLogoutClick);
   ui.newWorkspaceBtn?.addEventListener("click", handleNewWorkspaceClick);
   ui.workspaceCreateForm?.addEventListener("submit", handleWorkspaceCreateSubmit);
@@ -805,6 +807,7 @@ function setAppAccess(isGranted) {
 
   if (!isGranted) {
     syncSharedStateBadge("required");
+    syncLoginPasswordVisibility(false);
     ui.loginForm.reset();
     syncAccessRateLimitUi();
     if (!isAccessTemporarilyLocked()) {
@@ -938,6 +941,21 @@ function formatAccessLockMessage() {
 
 function isAccessLockMessage(value) {
   return /^Trop d'essais rates\./.test(value);
+}
+
+function toggleLoginPasswordVisibility() {
+  const shouldShow = ui.loginPasswordInput?.type === "password";
+  syncLoginPasswordVisibility(shouldShow);
+}
+
+function syncLoginPasswordVisibility(isVisible) {
+  if (!ui.loginPasswordInput || !ui.toggleLoginPasswordBtn) {
+    return;
+  }
+
+  ui.loginPasswordInput.type = isVisible ? "text" : "password";
+  ui.toggleLoginPasswordBtn.textContent = isVisible ? "Masquer" : "Voir";
+  ui.toggleLoginPasswordBtn.setAttribute("aria-pressed", String(isVisible));
 }
 
 function clearLegacyLocalState() {

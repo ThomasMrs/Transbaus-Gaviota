@@ -37,14 +37,25 @@
       <form id="loginForm" class="form-stack">
         <label class="field">
           <span>Code d'acces</span>
-          <input
-            id="loginPasswordInput"
-            type="password"
-            inputmode="numeric"
-            autocomplete="current-password"
-            placeholder="Entrez le code"
-            required
-          >
+          <div class="password-field">
+            <input
+              id="loginPasswordInput"
+              type="password"
+              inputmode="numeric"
+              autocomplete="current-password"
+              placeholder="Entrez le code"
+              required
+            >
+            <button
+              id="toggleLoginPasswordBtn"
+              class="btn btn--secondary password-field__toggle"
+              type="button"
+              aria-controls="loginPasswordInput"
+              aria-pressed="false"
+            >
+              Voir
+            </button>
+          </div>
         </label>
 
         <p id="loginStatus" class="field-help"></p>
