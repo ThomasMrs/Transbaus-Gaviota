@@ -1247,36 +1247,37 @@ function renderWorkspacePages() {
       ].filter(Boolean);
       const managementButtons = [
         !isCurrent
-          ? `<a class="btn btn--secondary document-card__action" href="${escapeAttribute(buildWorkspacePageUrl(page.id, page.title))}">Ouvrir</a>`
+          ? `<a class="btn btn--secondary document-card__action document-card__action--workspace" href="${escapeAttribute(buildWorkspacePageUrl(page.id, page.title))}">Ouvrir</a>`
           : "",
         !isPrimary
-          ? `<button class="btn btn--secondary document-card__action" type="button" data-workspace-action="rename-workspace" data-page-id="${escapeAttribute(page.id)}">Renommer</button>`
+          ? `<button class="btn btn--secondary document-card__action document-card__action--workspace" type="button" data-workspace-action="rename-workspace" data-page-id="${escapeAttribute(page.id)}">Renommer</button>`
           : "",
         !isPrimary
-          ? `<button class="btn btn--danger document-card__action" type="button" data-workspace-action="delete-workspace" data-page-id="${escapeAttribute(page.id)}">Supprimer</button>`
+          ? `<button class="btn btn--danger document-card__action document-card__action--workspace" type="button" data-workspace-action="delete-workspace" data-page-id="${escapeAttribute(page.id)}">Supprimer</button>`
           : "",
       ].filter(Boolean);
       const updatedAtLabel = page.updatedAt ? `Mise a jour ${escapeHtml(formatDate(page.updatedAt))}` : "";
       const createdAtLabel = !updatedAtLabel && page.createdAt ? `Creee le ${escapeHtml(formatDate(page.createdAt))}` : "";
+      const timestampLabel = updatedAtLabel || createdAtLabel;
 
       return `
         <article class="document-card document-card--workspace${isCurrent ? " document-card--active" : ""}">
-          <div class="document-card__body">
-            <div class="document-card__topline">
-              <p class="document-card__title">${escapeHtml(page.title || "Page sans nom")}</p>
-              ${statusBits.length ? `<div class="document-card__badges">${statusBits.join("")}</div>` : ""}
-            </div>
-            <p class="document-card__id">ID : ${escapeHtml(page.id)}</p>
-            <div class="document-summary document-summary--workspace">
-              ${countBits.join("")}
-            </div>
-            ${(updatedAtLabel || createdAtLabel)
-              ? `<p class="document-card__meta document-card__meta--workspace">${updatedAtLabel || createdAtLabel}</p>`
+          <div class="document-card__topline">
+            <p class="document-card__title">${escapeHtml(page.title || "Page sans nom")}</p>
+            ${statusBits.length ? `<div class="document-card__badges">${statusBits.join("")}</div>` : ""}
+          </div>
+          <p class="document-card__id">ID : ${escapeHtml(page.id)}</p>
+          <div class="document-summary document-summary--workspace">
+            ${countBits.join("")}
+          </div>
+          <div class="document-card__footer document-card__footer--workspace">
+            ${timestampLabel
+              ? `<p class="document-card__meta document-card__meta--workspace">${timestampLabel}</p>`
+              : `<span class="document-card__meta-spacer" aria-hidden="true"></span>`}
+            ${managementButtons.length
+              ? `<div class="document-card__actions document-card__actions--workspace">${managementButtons.join("")}</div>`
               : ""}
           </div>
-          ${managementButtons.length
-            ? `<div class="document-card__actions document-card__actions--workspace">${managementButtons.join("")}</div>`
-            : ""}
         </article>
       `;
     })
