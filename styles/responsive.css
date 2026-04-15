@@ -95,6 +95,8 @@
   .parcel-item__top,
   .parcel-item__bottom,
   .document-card,
+  .document-card__topline,
+  .document-card__badges,
   .modal__header,
   .actions,
   .move-group {

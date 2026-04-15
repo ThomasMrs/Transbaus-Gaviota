@@ -80,6 +80,13 @@ const state = createDefaultState();
 const workspaceLibrary = {
   pages: [],
 };
+const workspaceEditor = {
+  mode: "create",
+  targetPageId: "",
+};
+const workspaceDeleteDialog = {
+  targetPageId: "",
+};
 const collapseState = loadCollapseState();
 const accessRateLimit = loadAccessRateLimit();
 const sharedSyncMeta = {
@@ -136,6 +143,7 @@ async function initializeApp() {
   try {
     sharedStateStore = createSharedStateStore({
       pageId: workspacePage.id,
+      pageTitle: () => workspacePage.title,
     });
   } catch (error) {
     console.error("Client Supabase indisponible", error);
@@ -149,7 +157,7 @@ function getWorkspacePageContext() {
   const params = new URLSearchParams(globalThis.location?.search || "");
   const rawPageId = normalizeWorkspacePageId(params.get("page") || "");
   const requestedTitle = normalizeFreeText(params.get("label") || "");
-  if (!rawPageId) {
+  if (!rawPageId || rawPageId === "global") {
     return {
       id: "global",
       label: "principale",
@@ -211,24 +219,74 @@ function generateWorkspacePageId(seed = "") {
 
 function buildWorkspacePageUrl(pageId, title = "") {
   const url = new URL(globalThis.location?.href || "http://localhost/");
+  const normalizedPageId = normalizeWorkspacePageId(pageId);
   url.pathname = url.pathname.endsWith("/") ? `${url.pathname}index.html` : url.pathname;
-  url.searchParams.set("page", normalizeWorkspacePageId(pageId));
-  if (title) {
-    url.searchParams.set("label", title);
-  } else {
+  if (!normalizedPageId || normalizedPageId === "global") {
+    url.searchParams.delete("page");
     url.searchParams.delete("label");
+  } else {
+    url.searchParams.set("page", normalizedPageId);
+    if (title) {
+      url.searchParams.set("label", title);
+    } else {
+      url.searchParams.delete("label");
+    }
   }
   url.hash = "";
   return url.toString();
 }
 
 function openWorkspaceCreateModal() {
+  openWorkspaceEditorModal({
+    mode: "create",
+    pageId: "",
+    kicker: "Nouvelle page",
+    title: "Creer une page vierge",
+    help: "La nouvelle page s'ouvrira vide dans un nouvel onglet et restera disponible dans les pages enregistrees.",
+    submitLabel: "Creer la page",
+    value: getDefaultWorkspaceTitle(),
+  });
+}
+
+function openWorkspaceRenameModal(pageId) {
+  const page = getWorkspaceSummary(pageId);
+  if (!page || page.id === "global") {
+    showToast("Cette page ne peut pas etre renommee.", "danger");
+    return;
+  }
+
+  openWorkspaceEditorModal({
+    mode: "rename",
+    pageId: page.id,
+    kicker: "Gestion",
+    title: "Renommer la page",
+    help: "Le nouveau nom sera visible dans l'historique et sur tous les appareils.",
+    submitLabel: "Enregistrer le nom",
+    value: page.title || "",
+  });
+}
+
+function openWorkspaceEditorModal(config) {
   if (!ui.workspaceCreateModal || !ui.workspaceCreateInput) {
     return;
   }
 
+  workspaceEditor.mode = config.mode || "create";
+  workspaceEditor.targetPageId = config.pageId || "";
   ui.workspaceCreateForm?.reset();
-  ui.workspaceCreateInput.value = `Page ${new Date().toLocaleDateString("fr-FR")}`;
+  if (ui.workspaceCreateKicker) {
+    ui.workspaceCreateKicker.textContent = config.kicker || "Nouvelle page";
+  }
+  if (ui.workspaceCreateTitle) {
+    ui.workspaceCreateTitle.textContent = config.title || "Creer une page vierge";
+  }
+  if (ui.workspaceCreateHelp) {
+    ui.workspaceCreateHelp.textContent = config.help || "";
+  }
+  if (ui.workspaceCreateSubmitLabel) {
+    ui.workspaceCreateSubmitLabel.textContent = config.submitLabel || "Valider";
+  }
+  ui.workspaceCreateInput.value = config.value || "";
   ui.workspaceCreateModal.classList.remove("hidden");
   ui.workspaceCreateModal.setAttribute("aria-hidden", "false");
   window.setTimeout(() => {
@@ -242,17 +300,255 @@ function closeWorkspaceCreateModal() {
     return;
   }
 
+  workspaceEditor.mode = "create";
+  workspaceEditor.targetPageId = "";
   ui.workspaceCreateModal.classList.add("hidden");
   ui.workspaceCreateModal.setAttribute("aria-hidden", "true");
 }
 
-function handleWorkspaceCreateSubmit(event) {
+function getDefaultWorkspaceTitle() {
+  return `Page ${new Date().toLocaleDateString("fr-FR")}`;
+}
+
+async function handleWorkspaceCreateSubmit(event) {
   event.preventDefault();
 
-  const normalizedTitle = normalizeFreeText(ui.workspaceCreateInput?.value || "") || `Page ${new Date().toLocaleDateString("fr-FR")}`;
+  const normalizedTitle = normalizeFreeText(ui.workspaceCreateInput?.value || "") || getDefaultWorkspaceTitle();
+  if (workspaceEditor.mode === "rename") {
+    await renameWorkspacePage(workspaceEditor.targetPageId, normalizedTitle);
+    return;
+  }
+
   const pageId = generateWorkspacePageId(normalizedTitle);
   closeWorkspaceCreateModal();
   window.open(buildWorkspacePageUrl(pageId, normalizedTitle), "_blank", "noopener,noreferrer");
+}
+
+function openWorkspaceDeleteModal(pageId) {
+  const page = getWorkspaceSummary(pageId);
+  if (!page || page.id === "global" || !ui.workspaceDeleteModal) {
+    showToast("Cette page ne peut pas etre supprimee.", "danger");
+    return;
+  }
+
+  workspaceDeleteDialog.targetPageId = page.id;
+  if (ui.workspaceDeleteMessage) {
+    ui.workspaceDeleteMessage.textContent = `Supprimer "${page.title || "Page sans nom"}" de l'historique ? Cette action efface ses colis, ses baques et ses regles.`;
+  }
+  ui.workspaceDeleteModal.classList.remove("hidden");
+  ui.workspaceDeleteModal.setAttribute("aria-hidden", "false");
+}
+
+function closeWorkspaceDeleteModal() {
+  if (!ui.workspaceDeleteModal) {
+    return;
+  }
+
+  workspaceDeleteDialog.targetPageId = "";
+  ui.workspaceDeleteModal.classList.add("hidden");
+  ui.workspaceDeleteModal.setAttribute("aria-hidden", "true");
+}
+
+function getWorkspaceSummary(pageId) {
+  const normalizedPageId = normalizeWorkspacePageId(pageId);
+  if (!normalizedPageId && pageId !== "global") {
+    return null;
+  }
+
+  const resolvedPageId = normalizedPageId || "global";
+  const existingPage = workspaceLibrary.pages.find((page) => page.id === resolvedPageId);
+  if (existingPage) {
+    return existingPage;
+  }
+
+  if (resolvedPageId === workspacePage.id) {
+    return {
+      id: workspacePage.id,
+      title: workspacePage.title,
+      createdAt: "",
+      updatedAt: "",
+      parcelsCount: state.parcels.length,
+      baquesCount: state.baques.length,
+    };
+  }
+
+  return null;
+}
+
+function syncCurrentWorkspaceFromLibrary() {
+  if (workspacePage.isPrimary) {
+    return;
+  }
+
+  const currentPage = getWorkspaceSummary(workspacePage.id);
+  if (!currentPage) {
+    return;
+  }
+
+  const nextTitle = normalizeFreeText(currentPage.title || "");
+  if (!nextTitle || nextTitle === workspacePage.title) {
+    return;
+  }
+
+  workspacePage.title = nextTitle;
+  workspacePage.label = nextTitle;
+  workspacePage.requestedTitle = nextTitle;
+  syncWorkspacePageUi();
+  window.history.replaceState({}, "", buildWorkspacePageUrl(workspacePage.id, nextTitle));
+}
+
+async function waitForSharedSyncIdle(timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (sharedSync.requestInFlight && Date.now() < deadline) {
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, 120);
+    });
+  }
+
+  if (sharedSync.requestInFlight) {
+    const error = new Error("shared-sync-busy");
+    error.code = "shared-sync-busy";
+    throw error;
+  }
+}
+
+function getWorkspaceActionErrorMessage(error, fallbackMessage) {
+  const code = String(error?.code || "");
+  if (code === "workspace-primary-protected") {
+    return "La page principale ne peut pas etre modifiee ici.";
+  }
+
+  if (code === "workspace-page-missing") {
+    return "Cette page n'existe plus dans l'historique. Rechargez la liste.";
+  }
+
+  if (code === "shared-sync-busy") {
+    return "Une synchronisation est deja en cours. Reessayez dans quelques secondes.";
+  }
+
+  return fallbackMessage;
+}
+
+async function renameWorkspacePage(pageId, nextTitle) {
+  if (!sharedStateStore) {
+    showToast("La BDD cloud est indisponible pour l'instant.", "danger");
+    return;
+  }
+
+  const page = getWorkspaceSummary(pageId);
+  if (!page || page.id === "global") {
+    showToast("Cette page ne peut pas etre renommee.", "danger");
+    return;
+  }
+
+  const normalizedTitle = normalizeFreeText(nextTitle || "") || page.title || getDefaultWorkspaceTitle();
+  if (normalizedTitle === page.title) {
+    closeWorkspaceCreateModal();
+    return;
+  }
+
+  try {
+    await waitForSharedSyncIdle();
+    if (sharedSync.pendingPush) {
+      await flushSharedStateSyncQueue();
+    }
+
+    sharedSync.requestInFlight = true;
+    const payload = await sharedStateStore.renamePage(page.id, normalizedTitle);
+    sharedSyncMeta.updatedAt = normalizeStoredDate(payload.updatedAt || "", new Date().toISOString());
+    workspaceLibrary.pages = payload.pages || workspaceLibrary.pages;
+    if (page.id === workspacePage.id) {
+      workspacePage.title = normalizedTitle;
+      workspacePage.label = normalizedTitle;
+      workspacePage.requestedTitle = normalizedTitle;
+      syncWorkspacePageUi();
+      window.history.replaceState({}, "", buildWorkspacePageUrl(workspacePage.id, normalizedTitle));
+    } else {
+      syncCurrentWorkspaceFromLibrary();
+    }
+    closeWorkspaceCreateModal();
+    renderWorkspacePages();
+    markSharedSyncOnline();
+    showToast(`Page "${normalizedTitle}" renommee.`);
+  } catch (error) {
+    console.error("Renommage de page impossible", error);
+    if (/^(workspace-|shared-sync-busy)/.test(String(error?.code || ""))) {
+      showToast(getWorkspaceActionErrorMessage(error, "Impossible de renommer cette page pour le moment."), "danger");
+    } else {
+      markSharedSyncOffline(error);
+    }
+  } finally {
+    sharedSync.requestInFlight = false;
+  }
+}
+
+async function deleteWorkspacePage(pageId) {
+  if (!sharedStateStore) {
+    showToast("La BDD cloud est indisponible pour l'instant.", "danger");
+    return;
+  }
+
+  const page = getWorkspaceSummary(pageId);
+  if (!page || page.id === "global") {
+    showToast("Cette page ne peut pas etre supprimee.", "danger");
+    return;
+  }
+
+  try {
+    await waitForSharedSyncIdle();
+    if (sharedSync.pendingPush) {
+      await flushSharedStateSyncQueue();
+    }
+
+    sharedSync.requestInFlight = true;
+    const payload = await sharedStateStore.deletePage(page.id);
+    sharedSyncMeta.updatedAt = normalizeStoredDate(payload.updatedAt || "", new Date().toISOString());
+    workspaceLibrary.pages = payload.pages || workspaceLibrary.pages;
+    closeWorkspaceDeleteModal();
+    markSharedSyncOnline();
+    if (page.id === workspacePage.id) {
+      window.location.assign(buildWorkspacePageUrl("", ""));
+      return;
+    }
+
+    renderWorkspacePages();
+    showToast(`Page "${page.title}" supprimee.`);
+  } catch (error) {
+    console.error("Suppression de page impossible", error);
+    if (/^(workspace-|shared-sync-busy)/.test(String(error?.code || ""))) {
+      showToast(getWorkspaceActionErrorMessage(error, "Impossible de supprimer cette page pour le moment."), "danger");
+    } else {
+      markSharedSyncOffline(error);
+    }
+  } finally {
+    sharedSync.requestInFlight = false;
+  }
+}
+
+async function handleWorkspaceDeleteConfirm() {
+  await deleteWorkspacePage(workspaceDeleteDialog.targetPageId);
+}
+
+async function handleWorkspaceListClick(event) {
+  const actionButton = event.target.closest("[data-workspace-action]");
+  if (!(actionButton instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  const pageId = actionButton.dataset.pageId || "";
+  const action = actionButton.dataset.workspaceAction || "";
+  if (!pageId || !action) {
+    return;
+  }
+
+  if (action === "rename-workspace") {
+    openWorkspaceRenameModal(pageId);
+    return;
+  }
+
+  if (action === "delete-workspace") {
+    openWorkspaceDeleteModal(pageId);
+  }
 }
 
 function cacheElements() {
@@ -267,9 +563,18 @@ function cacheElements() {
   ui.workspaceList = document.querySelector("#workspaceList");
   ui.workspaceCreateModal = document.querySelector("#workspaceCreateModal");
   ui.workspaceCreateForm = document.querySelector("#workspaceCreateForm");
+  ui.workspaceCreateKicker = document.querySelector("#workspaceCreateKicker");
+  ui.workspaceCreateTitle = document.querySelector("#workspaceCreateTitle");
   ui.workspaceCreateInput = document.querySelector("#workspaceCreateInput");
+  ui.workspaceCreateHelp = document.querySelector("#workspaceCreateHelp");
+  ui.workspaceCreateSubmitLabel = document.querySelector("#workspaceCreateSubmitLabel");
   ui.closeWorkspaceCreateBtn = document.querySelector("#closeWorkspaceCreateBtn");
   ui.cancelWorkspaceCreateBtn = document.querySelector("#cancelWorkspaceCreateBtn");
+  ui.workspaceDeleteModal = document.querySelector("#workspaceDeleteModal");
+  ui.workspaceDeleteMessage = document.querySelector("#workspaceDeleteMessage");
+  ui.closeWorkspaceDeleteBtn = document.querySelector("#closeWorkspaceDeleteBtn");
+  ui.cancelWorkspaceDeleteBtn = document.querySelector("#cancelWorkspaceDeleteBtn");
+  ui.confirmWorkspaceDeleteBtn = document.querySelector("#confirmWorkspaceDeleteBtn");
   ui.syncStatusBadge = document.querySelector("#syncStatusBadge");
   ui.heroStats = document.querySelector("#heroStats");
   ui.parcelForm = document.querySelector("#parcelForm");
@@ -339,6 +644,14 @@ function bindEvents() {
   ui.workspaceCreateForm?.addEventListener("submit", handleWorkspaceCreateSubmit);
   ui.closeWorkspaceCreateBtn?.addEventListener("click", closeWorkspaceCreateModal);
   ui.cancelWorkspaceCreateBtn?.addEventListener("click", closeWorkspaceCreateModal);
+  ui.workspaceList?.addEventListener("click", (event) => {
+    void handleWorkspaceListClick(event);
+  });
+  ui.closeWorkspaceDeleteBtn?.addEventListener("click", closeWorkspaceDeleteModal);
+  ui.cancelWorkspaceDeleteBtn?.addEventListener("click", closeWorkspaceDeleteModal);
+  ui.confirmWorkspaceDeleteBtn?.addEventListener("click", () => {
+    void handleWorkspaceDeleteConfirm();
+  });
   ui.parcelForm.addEventListener("submit", handleParcelSubmit);
   ui.baqueForm.addEventListener("submit", handleBaqueSubmit);
   ui.searchInput.addEventListener("input", renderSearchResults);
@@ -368,6 +681,7 @@ function bindEvents() {
   ui.scannerModal.addEventListener("click", handleModalClick);
   ui.captureModal.addEventListener("click", handleModalClick);
   ui.workspaceCreateModal?.addEventListener("click", handleModalClick);
+  ui.workspaceDeleteModal?.addEventListener("click", handleModalClick);
   ui.baquesGrid.addEventListener("click", handleBaqueGridClick);
   ui.baquesGrid.addEventListener("change", handleBaqueGridChange);
   window.addEventListener("beforeunload", (event) => {
@@ -723,6 +1037,7 @@ async function initializeSharedStateSync() {
 
   const record = await fetchSharedStateRecord();
   workspaceLibrary.pages = record?.pages || [];
+  syncCurrentWorkspaceFromLibrary();
   if (record?.state) {
     hydrateState(record.state);
     sharedSyncMeta.updatedAt = record.updatedAt;
@@ -778,6 +1093,8 @@ async function flushSharedStateSyncQueue() {
     const payload = await sharedStateStore.saveStateRecord(snapshotState());
     sharedSyncMeta.updatedAt = normalizeStoredDate(payload.updatedAt || "", new Date().toISOString());
     workspaceLibrary.pages = payload.pages || workspaceLibrary.pages;
+    syncCurrentWorkspaceFromLibrary();
+    renderWorkspacePages();
     markSharedSyncOnline();
   } catch (error) {
     sharedSync.pendingPush = true;
@@ -806,12 +1123,15 @@ async function pullSharedStateFromServer() {
 
     if (record.updatedAt && record.updatedAt === sharedSyncMeta.updatedAt) {
       workspaceLibrary.pages = record.pages || workspaceLibrary.pages;
+      syncCurrentWorkspaceFromLibrary();
+      renderWorkspacePages();
       return;
     }
 
     hydrateState(record.state);
     sharedSyncMeta.updatedAt = record.updatedAt;
     workspaceLibrary.pages = record.pages || workspaceLibrary.pages;
+    syncCurrentWorkspaceFromLibrary();
     render();
   } finally {
     sharedSync.requestInFlight = false;
@@ -829,6 +1149,7 @@ async function fetchSharedStateRecord() {
     return {
       state: payload?.state || null,
       updatedAt: normalizeStoredDate(payload?.updatedAt || "", ""),
+      pages: Array.isArray(payload?.pages) ? payload.pages : [],
     };
   } catch (error) {
     markSharedSyncOffline(error);
@@ -915,26 +1236,47 @@ function renderWorkspacePages() {
   ui.workspaceList.innerHTML = pages
     .map((page) => {
       const isCurrent = page.id === workspacePage.id;
-      const metaBits = [
-        `${page.parcelsCount || 0} colis`,
-        `${page.baquesCount || 0} baques`,
-        page.updatedAt ? `Maj ${escapeHtml(formatDate(page.updatedAt))}` : "",
+      const isPrimary = page.id === "global";
+      const countBits = [
+        `<span class="distribution-chip">${escapeHtml(String(page.parcelsCount || 0))} colis</span>`,
+        `<span class="distribution-chip">${escapeHtml(String(page.baquesCount || 0))} baques</span>`,
+      ];
+      const statusBits = [
+        isPrimary ? `<span class="distribution-chip">Principale</span>` : "",
+        isCurrent ? `<span class="status-badge">Page actuelle</span>` : "",
       ].filter(Boolean);
+      const managementButtons = [
+        !isCurrent
+          ? `<a class="btn btn--secondary document-card__action" href="${escapeAttribute(buildWorkspacePageUrl(page.id, page.title))}">Ouvrir</a>`
+          : "",
+        !isPrimary
+          ? `<button class="btn btn--secondary document-card__action" type="button" data-workspace-action="rename-workspace" data-page-id="${escapeAttribute(page.id)}">Renommer</button>`
+          : "",
+        !isPrimary
+          ? `<button class="btn btn--danger document-card__action" type="button" data-workspace-action="delete-workspace" data-page-id="${escapeAttribute(page.id)}">Supprimer</button>`
+          : "",
+      ].filter(Boolean);
+      const updatedAtLabel = page.updatedAt ? `Mise a jour ${escapeHtml(formatDate(page.updatedAt))}` : "";
+      const createdAtLabel = !updatedAtLabel && page.createdAt ? `Creee le ${escapeHtml(formatDate(page.createdAt))}` : "";
 
       return `
-        <article class="document-card${isCurrent ? " document-card--active" : ""}">
+        <article class="document-card document-card--workspace${isCurrent ? " document-card--active" : ""}">
           <div class="document-card__body">
-            <p class="document-card__title">${escapeHtml(page.title || "Page sans nom")}</p>
-            <p class="document-card__meta">
-              <span><strong>ID :</strong> ${escapeHtml(page.id)}</span>
-              <span>${metaBits.join(" • ")}</span>
-            </p>
+            <div class="document-card__topline">
+              <p class="document-card__title">${escapeHtml(page.title || "Page sans nom")}</p>
+              ${statusBits.length ? `<div class="document-card__badges">${statusBits.join("")}</div>` : ""}
+            </div>
+            <p class="document-card__id">ID : ${escapeHtml(page.id)}</p>
+            <div class="document-summary document-summary--workspace">
+              ${countBits.join("")}
+            </div>
+            ${(updatedAtLabel || createdAtLabel)
+              ? `<p class="document-card__meta document-card__meta--workspace">${updatedAtLabel || createdAtLabel}</p>`
+              : ""}
           </div>
-          <div class="document-card__actions">
-            ${isCurrent
-              ? `<span class="status-badge">Page actuelle</span>`
-              : `<a class="btn btn--secondary document-card__action" href="${escapeAttribute(buildWorkspacePageUrl(page.id, page.title))}">Ouvrir</a>`}
-          </div>
+          ${managementButtons.length
+            ? `<div class="document-card__actions document-card__actions--workspace">${managementButtons.join("")}</div>`
+            : ""}
         </article>
       `;
     })
@@ -2161,6 +2503,10 @@ function handleBaqueGridChange(event) {
 function handleModalClick(event) {
   if (event.target instanceof HTMLElement && event.target.dataset.closeWorkspaceCreate === "true") {
     closeWorkspaceCreateModal();
+  }
+
+  if (event.target instanceof HTMLElement && event.target.dataset.closeWorkspaceDelete === "true") {
+    closeWorkspaceDeleteModal();
   }
 
   if (event.target instanceof HTMLElement && event.target.dataset.closeScanner === "true") {

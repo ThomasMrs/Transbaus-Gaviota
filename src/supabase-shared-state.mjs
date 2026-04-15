@@ -6,7 +6,9 @@ const DEFAULT_PAGE_ID = "global";
 
 export function createSharedStateStore(options = {}) {
   const pageId = normalizePageId(options.pageId || DEFAULT_PAGE_ID);
-  const pageTitle = normalizePageTitle(options.pageTitle || "");
+  const resolvePageTitle = () => normalizePageTitle(
+    typeof options.pageTitle === "function" ? options.pageTitle() : options.pageTitle || "",
+  );
   const createClient = globalThis.supabase?.createClient;
   if (typeof createClient !== "function") {
     throw new Error("supabase-unavailable");
@@ -34,28 +36,36 @@ export function createSharedStateStore(options = {}) {
       const sharedRecord = await fetchSharedRecord(client);
       const fallbackUpdatedAt = new Date().toISOString();
       const nextPayload = mergePageState(sharedRecord.payload, pageId, payload, {
-        title: pageTitle,
+        title: resolvePageTitle(),
         updatedAt: fallbackUpdatedAt,
       });
-      const { data, error } = await client
-        .from(SHARED_STATE_TABLE)
-        .upsert({
-          id: SHARED_STATE_ROW_ID,
-          payload: nextPayload,
-          updated_at: fallbackUpdatedAt,
-        }, {
-          onConflict: "id",
-        })
-        .select("updated_at")
-        .single();
-
-      if (error) {
-        throw error;
-      }
+      const updatedAt = await upsertSharedPayload(client, nextPayload, fallbackUpdatedAt);
 
       return {
-        updatedAt: String(data?.updated_at || fallbackUpdatedAt),
-        pages: listPages(nextPayload, String(data?.updated_at || fallbackUpdatedAt)),
+        updatedAt,
+        pages: listPages(nextPayload, updatedAt),
+      };
+    },
+
+    async renamePage(targetPageId, nextTitle) {
+      const sharedRecord = await fetchSharedRecord(client);
+      const fallbackUpdatedAt = new Date().toISOString();
+      const nextPayload = renameWorkspacePage(sharedRecord.payload, targetPageId, nextTitle, fallbackUpdatedAt);
+      const updatedAt = await upsertSharedPayload(client, nextPayload, fallbackUpdatedAt);
+      return {
+        updatedAt,
+        pages: listPages(nextPayload, updatedAt),
+      };
+    },
+
+    async deletePage(targetPageId) {
+      const sharedRecord = await fetchSharedRecord(client);
+      const fallbackUpdatedAt = new Date().toISOString();
+      const nextPayload = deleteWorkspacePage(sharedRecord.payload, targetPageId);
+      const updatedAt = await upsertSharedPayload(client, nextPayload, fallbackUpdatedAt);
+      return {
+        updatedAt,
+        pages: listPages(nextPayload, updatedAt),
       };
     },
   };
@@ -124,6 +134,26 @@ function extractPageState(sharedPayload, pageId) {
   return isAppStatePayload(pagePayload) ? pagePayload : null;
 }
 
+async function upsertSharedPayload(client, payload, fallbackUpdatedAt) {
+  const { data, error } = await client
+    .from(SHARED_STATE_TABLE)
+    .upsert({
+      id: SHARED_STATE_ROW_ID,
+      payload,
+      updated_at: fallbackUpdatedAt,
+    }, {
+      onConflict: "id",
+    })
+    .select("updated_at")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return String(data?.updated_at || fallbackUpdatedAt);
+}
+
 function mergePageState(sharedPayload, pageId, nextPagePayload, options = {}) {
   const container = normalizeWorkspaceContainer(sharedPayload);
   const existingMeta = normalizePageMeta(container.pageMeta?.[pageId], pageId, pageId === DEFAULT_PAGE_ID ? "Page principale" : "");
@@ -145,6 +175,58 @@ function mergePageState(sharedPayload, pageId, nextPagePayload, options = {}) {
         updatedAt,
       },
     },
+  };
+}
+
+function renameWorkspacePage(sharedPayload, pageId, nextTitle, updatedAt) {
+  const normalizedPageId = normalizePageId(pageId);
+  if (normalizedPageId === DEFAULT_PAGE_ID) {
+    throw createWorkspaceError("workspace-primary-protected", "La page principale ne peut pas etre renommee.");
+  }
+
+  const container = normalizeWorkspaceContainer(sharedPayload);
+  if (!hasWorkspacePage(container, normalizedPageId)) {
+    throw createWorkspaceError("workspace-page-missing", "La page a renommer est introuvable.");
+  }
+
+  const existingMeta = normalizePageMeta(container.pageMeta?.[normalizedPageId], normalizedPageId);
+  const title = normalizePageTitle(nextTitle) || existingMeta.title || defaultPageTitle(normalizedPageId);
+
+  return {
+    version: 3,
+    pages: { ...container.pages },
+    pageMeta: {
+      ...container.pageMeta,
+      [normalizedPageId]: {
+        id: normalizedPageId,
+        title,
+        createdAt: existingMeta.createdAt || updatedAt,
+        updatedAt,
+      },
+    },
+  };
+}
+
+function deleteWorkspacePage(sharedPayload, pageId) {
+  const normalizedPageId = normalizePageId(pageId);
+  if (normalizedPageId === DEFAULT_PAGE_ID) {
+    throw createWorkspaceError("workspace-primary-protected", "La page principale ne peut pas etre supprimee.");
+  }
+
+  const container = normalizeWorkspaceContainer(sharedPayload);
+  if (!hasWorkspacePage(container, normalizedPageId)) {
+    throw createWorkspaceError("workspace-page-missing", "La page a supprimer est introuvable.");
+  }
+
+  const nextPages = { ...container.pages };
+  const nextPageMeta = { ...container.pageMeta };
+  delete nextPages[normalizedPageId];
+  delete nextPageMeta[normalizedPageId];
+
+  return {
+    version: 3,
+    pages: nextPages,
+    pageMeta: nextPageMeta,
   };
 }
 
@@ -179,6 +261,11 @@ function normalizeWorkspaceContainer(sharedPayload) {
     pages: {},
     pageMeta: {},
   };
+}
+
+function hasWorkspacePage(container, pageId) {
+  return Object.prototype.hasOwnProperty.call(container.pages, pageId)
+    || Object.prototype.hasOwnProperty.call(container.pageMeta, pageId);
 }
 
 function listPages(sharedPayload, fallbackUpdatedAt = "") {
@@ -242,4 +329,10 @@ function normalizePageTitle(value) {
 
 function defaultPageTitle(pageId) {
   return pageId === DEFAULT_PAGE_ID ? "Page principale" : pageId.replace(/[-_]+/g, " ");
+}
+
+function createWorkspaceError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
 }

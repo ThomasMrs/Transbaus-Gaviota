@@ -627,7 +627,7 @@
     <div class="modal__dialog modal__dialog--workspace" role="dialog" aria-modal="true" aria-labelledby="workspaceCreateTitle">
       <div class="modal__header">
         <div>
-          <p class="section-kicker">Nouvelle page</p>
+          <p id="workspaceCreateKicker" class="section-kicker">Nouvelle page</p>
           <h2 id="workspaceCreateTitle">Creer une page vierge</h2>
         </div>
         <button id="closeWorkspaceCreateBtn" class="icon-btn" type="button">
@@ -647,19 +647,49 @@
           >
         </label>
 
-        <p class="field-help">
+        <p id="workspaceCreateHelp" class="field-help">
           La nouvelle page s'ouvrira vide dans un nouvel onglet et restera disponible dans les pages enregistrees.
         </p>
 
         <div class="actions">
           <button class="btn btn--primary" type="submit">
-            Creer la page
+            <span id="workspaceCreateSubmitLabel">Creer la page</span>
           </button>
           <button id="cancelWorkspaceCreateBtn" class="btn btn--secondary" type="button">
             Annuler
           </button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="workspaceDeleteModal" class="modal hidden" aria-hidden="true">
+    <div class="modal__backdrop" data-close-workspace-delete="true"></div>
+    <div class="modal__dialog modal__dialog--workspace" role="dialog" aria-modal="true" aria-labelledby="workspaceDeleteTitle">
+      <div class="modal__header">
+        <div>
+          <p class="section-kicker">Gestion</p>
+          <h2 id="workspaceDeleteTitle">Supprimer la page</h2>
+        </div>
+        <button id="closeWorkspaceDeleteBtn" class="icon-btn" type="button">
+          Fermer
+        </button>
+      </div>
+
+      <div class="form-stack">
+        <p id="workspaceDeleteMessage" class="field-help">
+          Cette action supprimera la page choisie et son contenu.
+        </p>
+
+        <div class="actions">
+          <button id="confirmWorkspaceDeleteBtn" class="btn btn--danger" type="button">
+            Supprimer la page
+          </button>
+          <button id="cancelWorkspaceDeleteBtn" class="btn btn--secondary" type="button">
+            Annuler
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 
