@@ -52,10 +52,6 @@
     grid-template-columns: 1fr;
   }
 
-  .collapse-toggle {
-    display: inline-flex;
-  }
-
   .panel--collapsible > .section-head,
   .section-block--collapsible > .section-head,
   .panel--highlight.panel--collapsible > .hero__side-head {

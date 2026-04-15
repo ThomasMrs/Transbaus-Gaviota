@@ -121,11 +121,13 @@
   font-size: 1.22rem;
   line-height: 1.15;
   letter-spacing: -0.03em;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: auto;
 }
 
 .destination-grid {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
 .sorting-plan {
@@ -212,17 +214,52 @@
 }
 
 .destination-count {
-  margin-top: 10px;
-  font-size: 2rem;
+  margin-top: 8px;
+  font-size: 2.35rem;
   line-height: 1;
   font-family: "Space Grotesk", sans-serif;
 }
 
+.destination-card__top {
+  display: grid;
+  gap: 12px;
+  align-items: start;
+}
+
 .destination-card__title-block {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.destination-card__title-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+.destination-card__eyebrow,
+.destination-card__subtitle {
+  margin: 0;
+}
+
+.destination-card__eyebrow {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary-deep);
+}
+
+.destination-card__subtitle {
+  color: var(--text-soft);
+}
+
+.destination-card__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .destination-card__action {

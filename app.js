@@ -41,7 +41,7 @@ import {
 import { createSharedStateStore } from "./src/supabase-shared-state.mjs";
 
 const LEGACY_STATE_STORAGE_KEY = "transbaus-gaviota-state-v1";
-const COLLAPSE_STORAGE_KEY = "le-baus-du-tri-collapse-v1";
+const COLLAPSE_STORAGE_KEY = "le-baus-du-tri-collapse-v2";
 const ACCESS_STORAGE_KEY = "transbaus-gaviota-access-v1";
 const ACCESS_RATE_LIMIT_STORAGE_KEY = "transbaus-gaviota-access-rate-v1";
 const LEGACY_SHARED_SYNC_META_STORAGE_KEY = "transbaus-gaviota-shared-sync-v1";
@@ -59,14 +59,14 @@ const PDF_STORE_NAME = "delivery-notes";
 const PDFJS_SCRIPT_URL = "vendor/pdf.min.js";
 const PDFJS_WORKER_URL = "vendor/pdf.worker.min.js";
 const DEFAULT_COLLAPSE_STATE = {
-  flow: true,
+  flow: false,
   scanner: false,
-  baqueForm: true,
-  search: true,
-  savedPages: true,
-  deliveryNote: true,
-  destinations: true,
-  baques: true,
+  baqueForm: false,
+  search: false,
+  savedPages: false,
+  deliveryNote: false,
+  destinations: false,
+  baques: false,
 };
 const DEFAULT_BAQUES = [
   { name: "Baque 1", location: "Zone A" },
@@ -969,6 +969,7 @@ function renderDestinationSummary() {
 
   ui.destinationSummary.innerHTML = destinationGroups
     .map((group) => {
+      const heading = getDestinationCardHeading(group);
       const chips = group.distribution
         .map(
           ([baqueName, count]) => `
@@ -1006,10 +1007,14 @@ function renderDestinationSummary() {
         <article class="destination-card${group.rule ? " destination-card--rule" : ""}">
           <div class="destination-card__top">
             <div class="destination-card__title-block">
-              <h3>${escapeHtml(group.label)}</h3>
-              ${group.rule ? `<span class="tag">Regle</span>` : ""}
+              ${heading.eyebrow ? `<p class="destination-card__eyebrow">${escapeHtml(heading.eyebrow)}</p>` : ""}
+              <div class="destination-card__title-row">
+                <h3>${escapeHtml(heading.title)}</h3>
+                ${group.rule ? `<span class="tag">Regle</span>` : ""}
+              </div>
+              ${heading.subtitle ? `<p class="destination-card__subtitle">${escapeHtml(heading.subtitle)}</p>` : ""}
             </div>
-            ${quickAction}
+            ${quickAction ? `<div class="destination-card__toolbar">${quickAction}</div>` : ""}
           </div>
           <div class="destination-count">${escapeHtml(String(group.parcels.length))}</div>
           <div class="destination-card__meta">
@@ -1024,6 +1029,40 @@ function renderDestinationSummary() {
       `;
     })
     .join("");
+}
+
+function getDestinationCardHeading(group) {
+  const label = normalizeFreeText(group?.label || "");
+  if (!label) {
+    return {
+      eyebrow: group?.rule ? "Groupe" : "",
+      title: "Sans destination",
+      subtitle: "",
+    };
+  }
+
+  if (group?.rule) {
+    return {
+      eyebrow: "Groupe",
+      title: label,
+      subtitle: "",
+    };
+  }
+
+  const match = label.match(/^(\d{5})\s+(.+)$/u);
+  if (!match) {
+    return {
+      eyebrow: "",
+      title: label,
+      subtitle: "",
+    };
+  }
+
+  return {
+    eyebrow: match[1],
+    title: match[2],
+    subtitle: "",
+  };
 }
 
 function renderSortingPlan() {
@@ -2111,8 +2150,6 @@ function handleCollapseToggle(event) {
 }
 
 function applyCollapseStateToDom() {
-  const isMobile = window.matchMedia("(max-width: 760px)").matches;
-
   document.querySelectorAll("[data-collapsible-key]").forEach((section) => {
     if (!(section instanceof HTMLElement)) {
       return;
@@ -2123,7 +2160,7 @@ function applyCollapseStateToDom() {
       return;
     }
 
-    const shouldCollapse = isMobile && Boolean(collapseState[sectionKey]);
+    const shouldCollapse = Boolean(collapseState[sectionKey]);
     const toggle = section.querySelector("[data-collapse-toggle]");
     const body = section.querySelector(".collapsible-body");
 
