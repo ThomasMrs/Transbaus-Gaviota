@@ -63,6 +63,7 @@ const DEFAULT_COLLAPSE_STATE = {
   scanner: false,
   baqueForm: true,
   search: true,
+  savedPages: true,
   deliveryNote: true,
   destinations: true,
   baques: true,
@@ -76,6 +77,9 @@ const DEFAULT_BAQUES = [
 
 const workspacePage = getWorkspacePageContext();
 const state = createDefaultState();
+const workspaceLibrary = {
+  pages: [],
+};
 const collapseState = loadCollapseState();
 const accessRateLimit = loadAccessRateLimit();
 const sharedSyncMeta = {
@@ -144,17 +148,22 @@ async function initializeApp() {
 function getWorkspacePageContext() {
   const params = new URLSearchParams(globalThis.location?.search || "");
   const rawPageId = normalizeWorkspacePageId(params.get("page") || "");
+  const requestedTitle = normalizeFreeText(params.get("label") || "");
   if (!rawPageId) {
     return {
       id: "global",
       label: "principale",
+      title: "Page principale",
+      requestedTitle: "",
       isPrimary: true,
     };
   }
 
   return {
     id: rawPageId,
-    label: rawPageId.replace(/[-_]+/g, " "),
+    label: requestedTitle || rawPageId.replace(/[-_]+/g, " "),
+    title: requestedTitle || rawPageId.replace(/[-_]+/g, " "),
+    requestedTitle,
     isPrimary: false,
   };
 }
@@ -169,22 +178,28 @@ function normalizeWorkspacePageId(value) {
 }
 
 function syncWorkspacePageUi() {
-  const titleSuffix = workspacePage.isPrimary ? "" : ` - ${workspacePage.label}`;
+  const titleSuffix = workspacePage.isPrimary ? "" : ` - ${workspacePage.title}`;
   document.title = `Le Baus du Tri${titleSuffix}`;
 
   if (ui.workspaceBadge) {
     ui.workspaceBadge.textContent = workspacePage.isPrimary
       ? "Page principale"
-      : `Page ${workspacePage.label}`;
+      : `Page ${workspacePage.title}`;
   }
 }
 
 function handleNewWorkspaceClick() {
-  const pageId = generateWorkspacePageId();
-  window.open(buildWorkspacePageUrl(pageId), "_blank", "noopener,noreferrer");
+  const typedTitle = globalThis.prompt("Nom de la nouvelle page a enregistrer :", "");
+  if (typedTitle === null) {
+    return;
+  }
+
+  const normalizedTitle = normalizeFreeText(typedTitle) || `Page ${new Date().toLocaleDateString("fr-FR")}`;
+  const pageId = generateWorkspacePageId(normalizedTitle);
+  window.open(buildWorkspacePageUrl(pageId, normalizedTitle), "_blank", "noopener,noreferrer");
 }
 
-function generateWorkspacePageId() {
+function generateWorkspacePageId(seed = "") {
   const now = new Date();
   const datePart = [
     now.getFullYear(),
@@ -197,13 +212,19 @@ function generateWorkspacePageId() {
     String(now.getSeconds()).padStart(2, "0"),
   ].join("");
   const randomPart = Math.random().toString(36).slice(2, 6);
-  return `page-${datePart}-${timePart}-${randomPart}`;
+  const slugSeed = normalizeWorkspacePageId(seed).slice(0, 18);
+  return `page-${slugSeed || datePart}-${timePart}-${randomPart}`;
 }
 
-function buildWorkspacePageUrl(pageId) {
+function buildWorkspacePageUrl(pageId, title = "") {
   const url = new URL(globalThis.location?.href || "http://localhost/");
   url.pathname = url.pathname.endsWith("/") ? `${url.pathname}index.html` : url.pathname;
   url.searchParams.set("page", normalizeWorkspacePageId(pageId));
+  if (title) {
+    url.searchParams.set("label", title);
+  } else {
+    url.searchParams.delete("label");
+  }
   url.hash = "";
   return url.toString();
 }
@@ -217,6 +238,7 @@ function cacheElements() {
   ui.logoutBtn = document.querySelector("#logoutBtn");
   ui.newWorkspaceBtn = document.querySelector("#newWorkspaceBtn");
   ui.workspaceBadge = document.querySelector("#workspaceBadge");
+  ui.workspaceList = document.querySelector("#workspaceList");
   ui.syncStatusBadge = document.querySelector("#syncStatusBadge");
   ui.heroStats = document.querySelector("#heroStats");
   ui.parcelForm = document.querySelector("#parcelForm");
@@ -665,12 +687,15 @@ async function initializeSharedStateSync() {
   }
 
   const record = await fetchSharedStateRecord();
+  workspaceLibrary.pages = record?.pages || [];
   if (record?.state) {
     hydrateState(record.state);
     sharedSyncMeta.updatedAt = record.updatedAt;
   } else if (record) {
-    sharedSync.pendingPush = true;
-    await flushSharedStateSyncQueue();
+    if (!workspacePage.isPrimary) {
+      sharedSync.pendingPush = true;
+      await flushSharedStateSyncQueue();
+    }
   }
 
   startSharedStatePolling();
@@ -717,6 +742,7 @@ async function flushSharedStateSyncQueue() {
   try {
     const payload = await sharedStateStore.saveStateRecord(snapshotState());
     sharedSyncMeta.updatedAt = normalizeStoredDate(payload.updatedAt || "", new Date().toISOString());
+    workspaceLibrary.pages = payload.pages || workspaceLibrary.pages;
     markSharedSyncOnline();
   } catch (error) {
     sharedSync.pendingPush = true;
@@ -744,11 +770,13 @@ async function pullSharedStateFromServer() {
     }
 
     if (record.updatedAt && record.updatedAt === sharedSyncMeta.updatedAt) {
+      workspaceLibrary.pages = record.pages || workspaceLibrary.pages;
       return;
     }
 
     hydrateState(record.state);
     sharedSyncMeta.updatedAt = record.updatedAt;
+    workspaceLibrary.pages = record.pages || workspaceLibrary.pages;
     render();
   } finally {
     sharedSync.requestInFlight = false;
@@ -822,6 +850,7 @@ function snapshotState() {
 function render() {
   renderHeroStats();
   renderBaqueSelect();
+  renderWorkspacePages();
   renderDestinationRuleTargetOptions();
   renderDestinationRules();
   renderDestinationSummary();
@@ -830,6 +859,51 @@ function render() {
   renderSearchResults();
   renderDeliveryNotes();
   applyCollapseStateToDom();
+}
+
+function renderWorkspacePages() {
+  if (!ui.workspaceList) {
+    return;
+  }
+
+  const pages = workspaceLibrary.pages.length
+    ? workspaceLibrary.pages
+    : [{
+      id: workspacePage.id,
+      title: workspacePage.title,
+      createdAt: "",
+      updatedAt: "",
+      parcelsCount: state.parcels.length,
+      baquesCount: state.baques.length,
+    }];
+
+  ui.workspaceList.innerHTML = pages
+    .map((page) => {
+      const isCurrent = page.id === workspacePage.id;
+      const metaBits = [
+        `${page.parcelsCount || 0} colis`,
+        `${page.baquesCount || 0} baques`,
+        page.updatedAt ? `Maj ${escapeHtml(formatDate(page.updatedAt))}` : "",
+      ].filter(Boolean);
+
+      return `
+        <article class="document-card${isCurrent ? " document-card--active" : ""}">
+          <div class="document-card__body">
+            <p class="document-card__title">${escapeHtml(page.title || "Page sans nom")}</p>
+            <p class="document-card__meta">
+              <span><strong>ID :</strong> ${escapeHtml(page.id)}</span>
+              <span>${metaBits.join(" • ")}</span>
+            </p>
+          </div>
+          <div class="document-card__actions">
+            ${isCurrent
+              ? `<span class="status-badge">Page actuelle</span>`
+              : `<a class="btn btn--secondary document-card__action" href="${escapeAttribute(buildWorkspacePageUrl(page.id, page.title))}">Ouvrir</a>`}
+          </div>
+        </article>
+      `;
+    })
+    .join("");
 }
 
 function safelyRenderSection(renderSection, fallbackRender) {

@@ -46,6 +46,11 @@
   gap: 14px;
 }
 
+.document-card--active {
+  border-color: rgba(95, 157, 200, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(95, 157, 200, 0.14);
+}
+
 .document-card__body {
   min-width: 0;
   flex: 1;
