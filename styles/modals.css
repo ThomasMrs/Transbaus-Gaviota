@@ -27,6 +27,10 @@
   box-shadow: 0 28px 80px rgba(13, 27, 38, 0.34);
 }
 
+.modal__dialog--workspace {
+  width: min(560px, 100%);
+}
+
 .modal__header {
   display: flex;
   justify-content: space-between;

@@ -622,6 +622,47 @@
     </main>
   </div>
 
+  <div id="workspaceCreateModal" class="modal hidden" aria-hidden="true">
+    <div class="modal__backdrop" data-close-workspace-create="true"></div>
+    <div class="modal__dialog modal__dialog--workspace" role="dialog" aria-modal="true" aria-labelledby="workspaceCreateTitle">
+      <div class="modal__header">
+        <div>
+          <p class="section-kicker">Nouvelle page</p>
+          <h2 id="workspaceCreateTitle">Creer une page vierge</h2>
+        </div>
+        <button id="closeWorkspaceCreateBtn" class="icon-btn" type="button">
+          Fermer
+        </button>
+      </div>
+
+      <form id="workspaceCreateForm" class="form-stack">
+        <label class="field">
+          <span>Nom de la page</span>
+          <input
+            id="workspaceCreateInput"
+            type="text"
+            maxlength="80"
+            placeholder="Exemple : Tournee du matin"
+            required
+          >
+        </label>
+
+        <p class="field-help">
+          La nouvelle page s'ouvrira vide dans un nouvel onglet et restera disponible dans les pages enregistrees.
+        </p>
+
+        <div class="actions">
+          <button class="btn btn--primary" type="submit">
+            Creer la page
+          </button>
+          <button id="cancelWorkspaceCreateBtn" class="btn btn--secondary" type="button">
+            Annuler
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div id="scannerModal" class="modal hidden" aria-hidden="true">
     <div class="modal__backdrop" data-close-scanner="true"></div>
     <div class="modal__dialog" role="dialog" aria-modal="true" aria-labelledby="scannerTitle">

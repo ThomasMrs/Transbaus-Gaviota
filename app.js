@@ -189,14 +189,7 @@ function syncWorkspacePageUi() {
 }
 
 function handleNewWorkspaceClick() {
-  const typedTitle = globalThis.prompt("Nom de la nouvelle page a enregistrer :", "");
-  if (typedTitle === null) {
-    return;
-  }
-
-  const normalizedTitle = normalizeFreeText(typedTitle) || `Page ${new Date().toLocaleDateString("fr-FR")}`;
-  const pageId = generateWorkspacePageId(normalizedTitle);
-  window.open(buildWorkspacePageUrl(pageId, normalizedTitle), "_blank", "noopener,noreferrer");
+  openWorkspaceCreateModal();
 }
 
 function generateWorkspacePageId(seed = "") {
@@ -229,6 +222,39 @@ function buildWorkspacePageUrl(pageId, title = "") {
   return url.toString();
 }
 
+function openWorkspaceCreateModal() {
+  if (!ui.workspaceCreateModal || !ui.workspaceCreateInput) {
+    return;
+  }
+
+  ui.workspaceCreateForm?.reset();
+  ui.workspaceCreateInput.value = `Page ${new Date().toLocaleDateString("fr-FR")}`;
+  ui.workspaceCreateModal.classList.remove("hidden");
+  ui.workspaceCreateModal.setAttribute("aria-hidden", "false");
+  window.setTimeout(() => {
+    ui.workspaceCreateInput.focus();
+    ui.workspaceCreateInput.select();
+  }, 0);
+}
+
+function closeWorkspaceCreateModal() {
+  if (!ui.workspaceCreateModal) {
+    return;
+  }
+
+  ui.workspaceCreateModal.classList.add("hidden");
+  ui.workspaceCreateModal.setAttribute("aria-hidden", "true");
+}
+
+function handleWorkspaceCreateSubmit(event) {
+  event.preventDefault();
+
+  const normalizedTitle = normalizeFreeText(ui.workspaceCreateInput?.value || "") || `Page ${new Date().toLocaleDateString("fr-FR")}`;
+  const pageId = generateWorkspacePageId(normalizedTitle);
+  closeWorkspaceCreateModal();
+  window.open(buildWorkspacePageUrl(pageId, normalizedTitle), "_blank", "noopener,noreferrer");
+}
+
 function cacheElements() {
   ui.loginGate = document.querySelector("#loginGate");
   ui.loginForm = document.querySelector("#loginForm");
@@ -239,6 +265,11 @@ function cacheElements() {
   ui.newWorkspaceBtn = document.querySelector("#newWorkspaceBtn");
   ui.workspaceBadge = document.querySelector("#workspaceBadge");
   ui.workspaceList = document.querySelector("#workspaceList");
+  ui.workspaceCreateModal = document.querySelector("#workspaceCreateModal");
+  ui.workspaceCreateForm = document.querySelector("#workspaceCreateForm");
+  ui.workspaceCreateInput = document.querySelector("#workspaceCreateInput");
+  ui.closeWorkspaceCreateBtn = document.querySelector("#closeWorkspaceCreateBtn");
+  ui.cancelWorkspaceCreateBtn = document.querySelector("#cancelWorkspaceCreateBtn");
   ui.syncStatusBadge = document.querySelector("#syncStatusBadge");
   ui.heroStats = document.querySelector("#heroStats");
   ui.parcelForm = document.querySelector("#parcelForm");
@@ -305,6 +336,9 @@ function bindEvents() {
   ui.loginForm.addEventListener("submit", handleLoginSubmit);
   ui.logoutBtn.addEventListener("click", handleLogoutClick);
   ui.newWorkspaceBtn?.addEventListener("click", handleNewWorkspaceClick);
+  ui.workspaceCreateForm?.addEventListener("submit", handleWorkspaceCreateSubmit);
+  ui.closeWorkspaceCreateBtn?.addEventListener("click", closeWorkspaceCreateModal);
+  ui.cancelWorkspaceCreateBtn?.addEventListener("click", closeWorkspaceCreateModal);
   ui.parcelForm.addEventListener("submit", handleParcelSubmit);
   ui.baqueForm.addEventListener("submit", handleBaqueSubmit);
   ui.searchInput.addEventListener("input", renderSearchResults);
@@ -333,6 +367,7 @@ function bindEvents() {
   ui.takeCaptureBtn.addEventListener("click", handleCapturePhoto);
   ui.scannerModal.addEventListener("click", handleModalClick);
   ui.captureModal.addEventListener("click", handleModalClick);
+  ui.workspaceCreateModal?.addEventListener("click", handleModalClick);
   ui.baquesGrid.addEventListener("click", handleBaqueGridClick);
   ui.baquesGrid.addEventListener("change", handleBaqueGridChange);
   window.addEventListener("beforeunload", (event) => {
@@ -2124,6 +2159,10 @@ function handleBaqueGridChange(event) {
 }
 
 function handleModalClick(event) {
+  if (event.target instanceof HTMLElement && event.target.dataset.closeWorkspaceCreate === "true") {
+    closeWorkspaceCreateModal();
+  }
+
   if (event.target instanceof HTMLElement && event.target.dataset.closeScanner === "true") {
     closeScanner();
   }
