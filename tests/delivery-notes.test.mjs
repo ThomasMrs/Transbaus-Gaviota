@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   compareDeliveryNoteEntries,
+  normalizeDeliveryNote,
   parseDeliveryNoteText,
 } from "../src/delivery-notes.mjs";
 
@@ -46,4 +47,53 @@ test("compareDeliveryNoteEntries reports missing packages and incomparable parce
   assert.equal(analysis.totalMissingCount, 1);
   assert.equal(analysis.incomparableParcelsCount, 1);
   assert.equal(analysis.missingEntries[0].missingCount, 1);
+});
+
+test("normalizeDeliveryNote keeps stored analysis entries for immediate recounts", () => {
+  const note = normalizeDeliveryNote({
+    id: "note-1",
+    name: "BL-001.pdf",
+    size: 2048,
+    importedAt: "2026-04-16T08:00:00.000Z",
+    analysis: {
+      totalEntries: 1,
+      totalExpectedCount: 2,
+      totalRegisteredCount: 1,
+      totalMissingCount: 1,
+      incomparableParcelsCount: 0,
+      parseError: "",
+      entries: [
+        {
+          commandNumber: " 063619 ",
+          expectedCount: 2,
+          client: " Menuiserie Vidal ",
+          city: " Saint-Vite ",
+          rawContext: "COMMANDE 063619",
+        },
+      ],
+      missingEntries: [
+        {
+          commandNumber: "063619",
+          expectedCount: 2,
+          registeredCount: 1,
+          missingCount: 1,
+          client: "Menuiserie Vidal",
+          city: "Saint-Vite",
+          rawContext: "COMMANDE 063619",
+        },
+      ],
+      analyzedAt: "2026-04-16T08:05:00.000Z",
+    },
+  });
+
+  assert.ok(note);
+  assert.equal(note.updatedAt, "2026-04-16T08:05:00.000Z");
+  assert.equal(note.analysis.entries.length, 1);
+  assert.deepEqual(note.analysis.entries[0], {
+    commandNumber: "063619",
+    expectedCount: 2,
+    client: "Menuiserie Vidal",
+    city: "Saint-Vite",
+    rawContext: "COMMANDE 063619",
+  });
 });

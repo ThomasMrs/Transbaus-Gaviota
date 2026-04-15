@@ -59,14 +59,14 @@ supabase/shared_state.sql
 ```
 
 Cela cree la table `public.shared_state` et les policies minimales pour que l'application puisse lire et ecrire son etat partage.
-Le meme script cree aussi une configuration d'acces privee et la fonction RPC `public.verify_site_access(text)` utilisee par l'ecran de connexion.
+Le script migre aussi l'ancien stockage "une seule ligne JSON" vers une ligne par page de travail, ce qui limite les ecrasements quand plusieurs personnes travaillent en parallele sur des pages differentes.
 
 Important :
 
-- le hash du mot de passe n'est plus stocke dans le frontend
-- apres avoir execute le script, le login verifie le mot de passe cote Supabase
-- le script migre automatiquement le hash actuellement utilise par l'application
-- pour passer plus tard a un hash `bcrypt`, utilisez la commande commentee en bas de `supabase/shared_state.sql`
+- les donnees `shared_state` ne sont plus accessibles en `anon`, seulement avec une vraie session Supabase Auth
+- apres avoir execute le script, creez dans `Authentication > Users` un utilisateur partage avec l'email `site-access@transbaus.local`
+- donnez a cet utilisateur le mot de passe que vous voulez utiliser comme code d'entree du site
+- si la confirmation email est activee dans votre projet, confirmez cet utilisateur ou desactivez cette verification pour ce compte partage
 
 ## Lancer le site
 
@@ -142,7 +142,7 @@ Important :
 - certaines etiquettes peuvent necessiter une verification manuelle apres lecture automatique
 - un colis enregistre sans numero de commande reste visible dans le site, mais il ne peut pas etre compare automatiquement avec un bon de livraison PDF
 - les fichiers PDF restent stockes dans le navigateur qui les a importes, meme si leur analyse est visible dans l'etat partage
-- le mot de passe d'entree est maintenant verifie cote Supabase, mais les donnees metier restent exposees via la cle publique tant que vous ne passez pas a une vraie authentification utilisateur
+- les anciens PDF analyses avant cette mise a jour doivent etre relances une fois pour memoriser leurs lignes internes et beneficier ensuite du recomptage immediat
 
 ## Structure du projet
 

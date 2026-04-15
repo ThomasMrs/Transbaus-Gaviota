@@ -15,11 +15,14 @@ export function normalizeDeliveryNote(note) {
     return null;
   }
 
+  const importedAt = normalizeStoredDate(note.importedAt, new Date().toISOString());
+
   return {
     id: String(note.id),
     name: normalizeFreeText(String(note.name)),
     size: Number(note.size || 0),
-    importedAt: normalizeStoredDate(note.importedAt, new Date().toISOString()),
+    importedAt,
+    updatedAt: normalizeStoredDate(note.updatedAt || note.analysis?.analyzedAt || importedAt, importedAt),
     analysis: normalizeDeliveryNoteAnalysis(note.analysis),
   };
 }
@@ -154,6 +157,12 @@ function normalizeDeliveryNoteAnalysis(analysis) {
     return null;
   }
 
+  const entries = Array.isArray(analysis.entries)
+    ? analysis.entries
+      .map((entry) => normalizeDeliveryNoteEntry(entry))
+      .filter((entry) => entry.commandNumber)
+    : [];
+
   return {
     totalEntries: Number(analysis.totalEntries || 0),
     totalExpectedCount: Number(analysis.totalExpectedCount || 0),
@@ -161,18 +170,25 @@ function normalizeDeliveryNoteAnalysis(analysis) {
     totalMissingCount: Number(analysis.totalMissingCount || 0),
     incomparableParcelsCount: Number(analysis.incomparableParcelsCount || 0),
     parseError: normalizeFreeText(analysis.parseError || ""),
+    entries,
     missingEntries: analysis.missingEntries
       .map((entry) => ({
-        commandNumber: normalizeCommandNumber(entry.commandNumber || ""),
-        expectedCount: Number(entry.expectedCount || 1),
+        ...normalizeDeliveryNoteEntry(entry),
         registeredCount: Number(entry.registeredCount || 0),
         missingCount: Number(entry.missingCount || 0),
-        client: normalizeFreeText(entry.client || ""),
-        city: normalizeFreeText(entry.city || ""),
-        rawContext: normalizeFreeText(entry.rawContext || ""),
       }))
       .filter((entry) => entry.commandNumber),
     analyzedAt: normalizeStoredDate(analysis.analyzedAt || "", ""),
+  };
+}
+
+function normalizeDeliveryNoteEntry(entry) {
+  return {
+    commandNumber: normalizeCommandNumber(entry?.commandNumber || ""),
+    expectedCount: Number(entry?.expectedCount || 1),
+    client: normalizeFreeText(entry?.client || ""),
+    city: normalizeFreeText(entry?.city || ""),
+    rawContext: normalizeFreeText(entry?.rawContext || ""),
   };
 }
 

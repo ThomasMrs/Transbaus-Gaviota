@@ -43,7 +43,6 @@ import { createSharedStateStore } from "./src/supabase-shared-state.mjs";
 
 const LEGACY_STATE_STORAGE_KEY = "transbaus-gaviota-state-v1";
 const COLLAPSE_STORAGE_KEY = "le-baus-du-tri-collapse-v2";
-const ACCESS_STORAGE_KEY = "transbaus-gaviota-access-v1";
 const ACCESS_RATE_LIMIT_STORAGE_KEY = "transbaus-gaviota-access-rate-v1";
 const LEGACY_SHARED_SYNC_META_STORAGE_KEY = "transbaus-gaviota-shared-sync-v1";
 const ACCESS_FAILED_ATTEMPTS_LIMIT = 3;
@@ -100,6 +99,7 @@ const sharedSync = {
   requestInFlight: false,
   pendingPush: false,
   offlineToastShown: false,
+  initialized: false,
 };
 const scanner = {
   instance: null,
@@ -139,9 +139,8 @@ async function initializeApp() {
   cacheElements();
   bindEvents();
   syncWorkspacePageUi();
-  syncAccessGate();
   clearLegacyLocalState();
-  syncSharedStateBadge("connecting");
+  syncSharedStateBadge("required");
   try {
     sharedStateStore = createSharedStateStore({
       pageId: workspacePage.id,
@@ -151,7 +150,7 @@ async function initializeApp() {
     console.error("Client Supabase indisponible", error);
     markSharedSyncOffline(error);
   }
-  await initializeSharedStateSync();
+  await syncAccessGate();
   render();
 }
 
@@ -711,9 +710,27 @@ function bindEvents() {
   window.addEventListener("resize", applyCollapseStateToDom);
 }
 
-function syncAccessGate() {
+async function syncAccessGate() {
   refreshAccessRateLimit();
-  setAppAccess(hasStoredAccess());
+  if (!sharedStateStore?.getAccessSession) {
+    setAppAccess(false);
+    return false;
+  }
+
+  try {
+    const session = await sharedStateStore.getAccessSession();
+    const isGranted = Boolean(session);
+    setAppAccess(isGranted);
+    if (isGranted) {
+      await initializeSharedStateSync();
+    }
+    return isGranted;
+  } catch (error) {
+    console.error("Session Supabase indisponible", error);
+    setAppAccess(false);
+    markSharedSyncOffline(error);
+    return false;
+  }
 }
 
 async function handleLoginSubmit(event) {
@@ -733,14 +750,22 @@ async function handleLoginSubmit(event) {
       return;
     }
 
-    if (!sharedStateStore?.verifyAccessPassword) {
+    if (!sharedStateStore?.signInWithPassword) {
       ui.loginStatus.textContent = "Connexion a Supabase indisponible. Rechargez la page puis reessayez.";
       showToast("Connexion a Supabase indisponible. Rechargez la page puis reessayez.", "danger");
       return;
     }
 
-    const isPasswordValid = await sharedStateStore.verifyAccessPassword(typedPassword);
-    if (!isPasswordValid) {
+    await sharedStateStore.signInWithPassword(typedPassword);
+    resetAccessRateLimit();
+    ui.loginStatus.textContent = "";
+    ui.loginForm.reset();
+    setAppAccess(true);
+    await initializeSharedStateSync({ force: true });
+    render();
+  } catch (error) {
+    console.error("Connexion impossible", error);
+    if (/invalid login credentials|invalid_credentials|email not confirmed/i.test(String(error?.message || ""))) {
       registerFailedLoginAttempt();
       if (!isAccessTemporarilyLocked()) {
         ui.loginPasswordInput.focus();
@@ -749,28 +774,28 @@ async function handleLoginSubmit(event) {
       return;
     }
 
-    resetAccessRateLimit();
-    window.localStorage.setItem(ACCESS_STORAGE_KEY, "granted");
-    ui.loginStatus.textContent = "";
-    ui.loginForm.reset();
-    setAppAccess(true);
-  } catch (error) {
-    console.error("Connexion impossible", error);
     const errorMessage = getSharedSyncErrorMessage(error);
     ui.loginStatus.textContent = errorMessage;
     showToast(errorMessage, "danger");
   }
 }
 
-function handleLogoutClick() {
-  window.localStorage.removeItem(ACCESS_STORAGE_KEY);
+async function handleLogoutClick() {
+  try {
+    await sharedStateStore?.signOut?.();
+  } catch (error) {
+    console.error("Deconnexion impossible", error);
+  }
+
   void closeScanner();
   void closeCaptureModal();
+  stopSharedStatePolling();
+  sharedSync.initialized = false;
+  sharedSyncMeta.updatedAt = "";
+  workspaceLibrary.pages = [];
+  hydrateState(createDefaultState());
+  render();
   setAppAccess(false);
-}
-
-function hasStoredAccess() {
-  return window.localStorage.getItem(ACCESS_STORAGE_KEY) === "granted";
 }
 
 function setAppAccess(isGranted) {
@@ -779,6 +804,7 @@ function setAppAccess(isGranted) {
   ui.logoutBtn.hidden = !isGranted;
 
   if (!isGranted) {
+    syncSharedStateBadge("required");
     ui.loginForm.reset();
     syncAccessRateLimitUi();
     if (!isAccessTemporarilyLocked()) {
@@ -788,6 +814,7 @@ function setAppAccess(isGranted) {
   }
 
   stopAccessLockCountdown();
+  syncSharedStateBadge(sharedSync.online ? "shared" : "connecting");
   ui.routeCodeInput.focus();
 }
 
@@ -916,6 +943,7 @@ function isAccessLockMessage(value) {
 function clearLegacyLocalState() {
   window.localStorage.removeItem(LEGACY_STATE_STORAGE_KEY);
   window.localStorage.removeItem(LEGACY_SHARED_SYNC_META_STORAGE_KEY);
+  window.localStorage.removeItem("transbaus-gaviota-access-v1");
 }
 
 function normalizeSmallParcelScan(scan) {
@@ -953,6 +981,7 @@ function normalizePersistedState(parsed) {
     location: String(baque.location || "Sans emplacement"),
     validatedAt: normalizeStoredDate(baque.validatedAt || "", ""),
     createdAt: normalizeStoredDate(baque.createdAt, new Date().toISOString()),
+    updatedAt: normalizeStoredDate(baque.updatedAt || baque.validatedAt || baque.createdAt, new Date().toISOString()),
   }));
 
   const availableBaqueIds = new Set(baques.map((baque) => baque.id));
@@ -1015,13 +1044,15 @@ function hydrateState(nextState) {
 }
 
 function createDefaultState() {
+  const now = new Date().toISOString();
   return {
     baques: DEFAULT_BAQUES.map((baque) => ({
       id: createId(),
       name: baque.name,
       location: baque.location,
       validatedAt: "",
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     })),
     parcels: [],
     smallParcelScans: [],
@@ -1051,6 +1082,7 @@ function saveCollapseState() {
 }
 
 function saveState() {
+  refreshStoredDeliveryNoteAnalyses();
   queueSharedStateSync();
 }
 
@@ -1070,16 +1102,20 @@ function syncSharedStateBadge(mode) {
   ui.syncStatusBadge.textContent = labels[mode] || labels.required;
 }
 
-async function initializeSharedStateSync() {
-  if (!sharedStateStore) {
+async function initializeSharedStateSync(options = {}) {
+  if (!sharedStateStore || (sharedSync.initialized && !options.force)) {
     return;
   }
 
+  syncSharedStateBadge("connecting");
   const record = await fetchSharedStateRecord();
   workspaceLibrary.pages = record?.pages || [];
   syncCurrentWorkspaceFromLibrary();
   if (record?.state) {
     hydrateState(record.state);
+    if (refreshStoredDeliveryNoteAnalyses()) {
+      queueSharedStateSync();
+    }
     sharedSyncMeta.updatedAt = record.updatedAt;
   } else if (record) {
     if (!workspacePage.isPrimary) {
@@ -1088,6 +1124,7 @@ async function initializeSharedStateSync() {
     }
   }
 
+  sharedSync.initialized = true;
   startSharedStatePolling();
 }
 
@@ -1099,6 +1136,15 @@ function startSharedStatePolling() {
   sharedSync.pollingId = window.setInterval(() => {
     void pollSharedState();
   }, SHARED_SYNC_POLL_MS);
+}
+
+function stopSharedStatePolling() {
+  if (!sharedSync.pollingId) {
+    return;
+  }
+
+  window.clearInterval(sharedSync.pollingId);
+  sharedSync.pollingId = 0;
 }
 
 async function pollSharedState() {
@@ -1169,6 +1215,9 @@ async function pullSharedStateFromServer() {
     }
 
     hydrateState(record.state);
+    if (refreshStoredDeliveryNoteAnalyses()) {
+      queueSharedStateSync();
+    }
     sharedSyncMeta.updatedAt = record.updatedAt;
     workspaceLibrary.pages = record.pages || workspaceLibrary.pages;
     syncCurrentWorkspaceFromLibrary();
@@ -1221,15 +1270,27 @@ function getSharedSyncErrorMessage(error) {
   const message = normalizeFreeText(String(error?.message || ""));
 
   if (code === "42P01" || /shared_state/i.test(message)) {
-    return "La table Supabase n'existe pas encore. Lancez le script SQL puis rechargez la page.";
+    return "La table Supabase n'existe pas encore. Relancez le script SQL puis rechargez la page.";
   }
 
-  if (code === "42883" || /verify_site_access/i.test(message)) {
-    return "La fonction d'acces Supabase n'existe pas encore. Lancez le script SQL d'acces puis rechargez la page.";
+  if (code === "42703" || /created_at|title/.test(message)) {
+    return "La structure Supabase est incomplete. Relancez le script SQL de migration puis rechargez la page.";
   }
 
   if (/permission|row-level security|rls|42501/i.test(`${code} ${message}`)) {
-    return "Supabase refuse l'acces a la table. Verifiez les droits et les policies RLS.";
+    return "Supabase refuse l'acces aux donnees. Verifiez la connexion et les policies RLS.";
+  }
+
+  if (/invalid login credentials|invalid_credentials/i.test(message)) {
+    return "Code d'acces incorrect.";
+  }
+
+  if (/email not confirmed/i.test(message)) {
+    return "Le compte Supabase n'est pas confirme. Verifiez l'utilisateur d'acces dans Supabase Auth.";
+  }
+
+  if (/user not found|invalid/i.test(message) && /auth/i.test(String(error?.name || ""))) {
+    return "Le compte d'acces Supabase est introuvable. Creez l'utilisateur de partage puis reessayez.";
   }
 
   if (/supabase-unavailable/i.test(message)) {
@@ -2203,6 +2264,54 @@ function getPdfComparableParcels() {
   return [...state.parcels, ...expandSmallParcelScansForComparison()];
 }
 
+function normalizeComparableDeliveryEntries(entries) {
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+
+  return entries
+    .map((entry) => ({
+      commandNumber: normalizeCommandNumber(entry?.commandNumber || ""),
+      expectedCount: Math.max(1, Number(entry?.expectedCount || 1)),
+      client: normalizeFreeText(entry?.client || ""),
+      city: normalizeFreeText(entry?.city || ""),
+      rawContext: normalizeFreeText(entry?.rawContext || ""),
+    }))
+    .filter((entry) => entry.commandNumber);
+}
+
+function buildStoredDeliveryNoteAnalysis(entries, analyzedAt = "") {
+  const normalizedEntries = normalizeComparableDeliveryEntries(entries);
+  const analysis = compareDeliveryNoteEntries(normalizedEntries, getPdfComparableParcels());
+  return {
+    ...analysis,
+    entries: normalizedEntries,
+    analyzedAt: normalizeStoredDate(analyzedAt || "", new Date().toISOString()),
+  };
+}
+
+function refreshStoredDeliveryNoteAnalyses() {
+  const now = new Date().toISOString();
+  let updated = false;
+
+  state.deliveryNotes.forEach((note) => {
+    if (!Array.isArray(note?.analysis?.entries) || !note.analysis.entries.length) {
+      return;
+    }
+
+    const nextAnalysis = buildStoredDeliveryNoteAnalysis(note.analysis.entries, note.analysis.analyzedAt);
+    if (JSON.stringify(note.analysis) === JSON.stringify(nextAnalysis)) {
+      return;
+    }
+
+    note.analysis = nextAnalysis;
+    note.updatedAt = now;
+    updated = true;
+  });
+
+  return updated;
+}
+
 function renderSmallParcelScans() {
   if (!ui.smallParcelList || !ui.smallParcelSummary) {
     return;
@@ -2475,12 +2584,14 @@ function handleBaqueSubmit(event) {
     return;
   }
 
+  const now = new Date().toISOString();
   state.baques.push({
     id: createId(),
     name,
     location,
     validatedAt: "",
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
   });
 
   saveState();
@@ -2502,13 +2613,15 @@ function handleDestinationRuleSubmit(event) {
     return;
   }
 
+  const now = new Date().toISOString();
   state.destinationRules.push({
     id: createId(),
     label,
     matchMode,
     preferredBaqueId,
     patterns,
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
   });
 
   saveState();
@@ -2594,6 +2707,7 @@ function handleDestinationRulesChange(event) {
     rule.patterns = nextPatterns;
   }
 
+  rule.updatedAt = new Date().toISOString();
   saveState();
   render();
   showToast("Regle mise a jour.");
@@ -2646,6 +2760,7 @@ function handleBaqueGridChange(event) {
   }
 
   baque[field] = nextValue;
+  baque.updatedAt = new Date().toISOString();
   saveState();
   render();
   showToast("Baque mise a jour.");
@@ -2732,11 +2847,13 @@ async function handleDeliveryNoteImport(event) {
     return;
   }
 
+  const importedAt = new Date().toISOString();
   const deliveryNote = {
     id: createId(),
     name: normalizeFreeText(file.name || "Bon-de-livraison.pdf"),
     size: Number(file.size || 0),
-    importedAt: new Date().toISOString(),
+    importedAt,
+    updatedAt: importedAt,
     analysis: null,
   };
 
@@ -2863,12 +2980,11 @@ async function analyzeDeliveryNote(noteId, providedFile = null) {
       ui.deliveryNoteStatus.textContent = message;
     });
     const entries = parseDeliveryNoteText(extractedText);
-    const analysis = compareDeliveryNoteEntries(entries, getPdfComparableParcels());
+    const analyzedAt = new Date().toISOString();
+    const analysis = buildStoredDeliveryNoteAnalysis(entries, analyzedAt);
 
-    deliveryNote.analysis = {
-      ...analysis,
-      analyzedAt: new Date().toISOString(),
-    };
+    deliveryNote.analysis = analysis;
+    deliveryNote.updatedAt = analyzedAt;
 
     saveState();
     renderDeliveryNotes();
@@ -2879,16 +2995,19 @@ async function analyzeDeliveryNote(noteId, providedFile = null) {
       : `Aucun colis manquant detecte dans ${deliveryNote.name}.`;
   } catch (error) {
     const errorMessage = getDeliveryNoteErrorMessage(error);
+    const analyzedAt = new Date().toISOString();
     deliveryNote.analysis = {
       totalEntries: 0,
       totalExpectedCount: 0,
       totalRegisteredCount: 0,
       totalMissingCount: 0,
-      incomparableParcelsCount: countIncomparableParcels(state.parcels),
+      incomparableParcelsCount: countIncomparableParcels(getPdfComparableParcels()),
       parseError: errorMessage,
+      entries: [],
       missingEntries: [],
-      analyzedAt: new Date().toISOString(),
+      analyzedAt,
     };
+    deliveryNote.updatedAt = analyzedAt;
     saveState();
     renderDeliveryNotes();
     ui.deliveryNoteStatus.textContent = errorMessage;
@@ -2981,11 +3100,10 @@ async function simulateDeliveryNoteParcels(noteId) {
 
     invalidateBaqueValidations([...affectedBaqueIds]);
 
-    const analysis = compareDeliveryNoteEntries(entries, getPdfComparableParcels());
-    deliveryNote.analysis = {
-      ...analysis,
-      analyzedAt: new Date().toISOString(),
-    };
+    const analyzedAt = new Date().toISOString();
+    const analysis = buildStoredDeliveryNoteAnalysis(entries, analyzedAt);
+    deliveryNote.analysis = analysis;
+    deliveryNote.updatedAt = analyzedAt;
 
     saveState();
     render();
@@ -4066,6 +4184,7 @@ function upsertSmallParcelScan(scannedCode = "") {
   });
 
   saveState();
+  renderHeroStats();
   renderSmallParcelScans();
   renderDeliveryNotes();
   clearSmallParcelForm();
@@ -4098,6 +4217,7 @@ function deleteSmallParcelScan(scanId) {
 
   state.smallParcelScans = state.smallParcelScans.filter((item) => item.id !== scanId);
   saveState();
+  renderHeroStats();
   renderSmallParcelScans();
   renderDeliveryNotes();
   showToast(`Scan petits colis ${scan.commandNumber} supprime.`);
@@ -4119,11 +4239,12 @@ function deleteBaque(baqueId) {
     return;
   }
 
+  const now = new Date().toISOString();
   state.baques = state.baques.filter((item) => item.id !== baqueId);
   state.parcels = state.parcels.filter((parcel) => parcel.currentBaqueId !== baqueId);
   state.destinationRules = state.destinationRules.map((rule) => (
     rule.preferredBaqueId === baqueId
-      ? { ...rule, preferredBaqueId: "" }
+      ? { ...rule, preferredBaqueId: "", updatedAt: now }
       : rule
   ));
   saveState();
@@ -4155,6 +4276,7 @@ function toggleBaqueValidation(baqueId) {
 
   if (baque.validatedAt) {
     baque.validatedAt = "";
+    baque.updatedAt = new Date().toISOString();
     saveState();
     render();
     showToast(`Validation retiree pour ${baque.name}.`);
@@ -4162,6 +4284,7 @@ function toggleBaqueValidation(baqueId) {
   }
 
   baque.validatedAt = new Date().toISOString();
+  baque.updatedAt = baque.validatedAt;
   saveState();
   render();
   showToast(`${baque.name} marquee comme terminee.`);
@@ -4178,6 +4301,7 @@ function invalidateBaqueValidation(baqueId) {
   }
 
   baque.validatedAt = "";
+  baque.updatedAt = new Date().toISOString();
   return true;
 }
 
@@ -4551,7 +4675,8 @@ function normalizeDestinationRule(rule, options = {}) {
     matchMode: normalizeDestinationRuleMatchMode(rule.matchMode),
     preferredBaqueId: normalizeDestinationRuleTargetBaqueId(rule.preferredBaqueId || "", options.availableBaqueIds),
     patterns,
-    createdAt: rule.createdAt || new Date().toISOString(),
+    createdAt: normalizeStoredDate(rule.createdAt || "", new Date().toISOString()),
+    updatedAt: normalizeStoredDate(rule.updatedAt || rule.createdAt || "", new Date().toISOString()),
   };
 }
 
