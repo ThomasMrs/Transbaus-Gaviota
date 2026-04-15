@@ -557,6 +557,7 @@ function cacheElements() {
   ui.loginForm = document.querySelector("#loginForm");
   ui.loginPasswordInput = document.querySelector("#loginPasswordInput");
   ui.toggleLoginPasswordBtn = document.querySelector("#toggleLoginPasswordBtn");
+  ui.toggleLoginPasswordIcon = document.querySelector("#toggleLoginPasswordIcon");
   ui.loginStatus = document.querySelector("#loginStatus");
   ui.loginSubmitBtn = ui.loginForm?.querySelector('button[type="submit"]');
   ui.logoutBtn = document.querySelector("#logoutBtn");
@@ -953,17 +954,56 @@ function syncLoginPasswordVisibility(isVisible) {
     return;
   }
 
-  const showIcon = ui.toggleLoginPasswordBtn.querySelector(".password-field__icon--show");
-  const hideIcon = ui.toggleLoginPasswordBtn.querySelector(".password-field__icon--hide");
   ui.loginPasswordInput.type = isVisible ? "text" : "password";
   ui.toggleLoginPasswordBtn.setAttribute("aria-pressed", String(isVisible));
   ui.toggleLoginPasswordBtn.setAttribute("aria-label", isVisible ? "Masquer le code" : "Afficher le code");
   ui.toggleLoginPasswordBtn.setAttribute("title", isVisible ? "Masquer le code" : "Afficher le code");
-  if (showIcon) {
-    showIcon.hidden = isVisible;
-  }
-  if (hideIcon) {
-    hideIcon.hidden = !isVisible;
+  if (ui.toggleLoginPasswordIcon) {
+    ui.toggleLoginPasswordIcon.innerHTML = isVisible
+      ? `
+        <path
+          d="M3 4.5 21 19.5"
+          fill="none"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="1.8"
+        />
+        <path
+          d="M10.7 6.3A10.72 10.72 0 0 1 12 6c6 0 9.75 6 9.75 6a18.88 18.88 0 0 1-4.03 4.49M6.44 8.2C4.11 9.72 2.25 12 2.25 12s3.75 6 9.75 6c1.51 0 2.89-.38 4.12-.97"
+          fill="none"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="1.8"
+        />
+        <path
+          d="M9.88 9.88A3.01 3.01 0 0 0 9 12c0 1.66 1.34 3 3 3 .78 0 1.49-.3 2.02-.8"
+          fill="none"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="1.8"
+        />
+      `
+      : `
+        <path
+          d="M2.25 12s3.75-6 9.75-6 9.75 6 9.75 6-3.75 6-9.75 6-9.75-6-9.75-6Z"
+          fill="none"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="1.8"
+        />
+        <circle
+          cx="12"
+          cy="12"
+          r="3.2"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+        />
+      `;
   }
 }
 
