@@ -45,7 +45,6 @@ const COLLAPSE_STORAGE_KEY = "le-baus-du-tri-collapse-v2";
 const ACCESS_STORAGE_KEY = "transbaus-gaviota-access-v1";
 const ACCESS_RATE_LIMIT_STORAGE_KEY = "transbaus-gaviota-access-rate-v1";
 const LEGACY_SHARED_SYNC_META_STORAGE_KEY = "transbaus-gaviota-shared-sync-v1";
-const ACCESS_PASSWORD_HASH_SHA256 = "a20a2b7bb0842d5cf8a0c06c626421fd51ec103925c1819a51271f2779afa730";
 const ACCESS_FAILED_ATTEMPTS_LIMIT = 3;
 const ACCESS_LOCK_DURATION_MS = 10_000;
 const SHARED_SYNC_POLL_MS = 8_000;
@@ -713,14 +712,20 @@ async function handleLoginSubmit(event) {
     }
 
     const typedPassword = ui.loginPasswordInput.value.trim();
-    const typedPasswordHash = await hashAccessPassword(typedPassword);
-    if (!typedPasswordHash) {
-      ui.loginStatus.textContent = "Impossible de verifier le code sur ce navigateur. Utilisez localhost/https.";
-      showToast("Verification du code impossible sur ce navigateur.", "danger");
+    if (!typedPassword) {
+      ui.loginStatus.textContent = "Saisissez le code d'acces.";
+      ui.loginPasswordInput.focus();
       return;
     }
 
-    if (typedPasswordHash !== ACCESS_PASSWORD_HASH_SHA256) {
+    if (!sharedStateStore?.verifyAccessPassword) {
+      ui.loginStatus.textContent = "Connexion a Supabase indisponible. Rechargez la page puis reessayez.";
+      showToast("Connexion a Supabase indisponible. Rechargez la page puis reessayez.", "danger");
+      return;
+    }
+
+    const isPasswordValid = await sharedStateStore.verifyAccessPassword(typedPassword);
+    if (!isPasswordValid) {
       registerFailedLoginAttempt();
       if (!isAccessTemporarilyLocked()) {
         ui.loginPasswordInput.focus();
@@ -736,8 +741,9 @@ async function handleLoginSubmit(event) {
     setAppAccess(true);
   } catch (error) {
     console.error("Connexion impossible", error);
-    ui.loginStatus.textContent = "Connexion impossible. Rechargez la page puis reessayez.";
-    showToast("Connexion impossible. Rechargez la page puis reessayez.", "danger");
+    const errorMessage = getSharedSyncErrorMessage(error);
+    ui.loginStatus.textContent = errorMessage;
+    showToast(errorMessage, "danger");
   }
 }
 
@@ -890,18 +896,6 @@ function formatAccessLockMessage() {
 
 function isAccessLockMessage(value) {
   return /^Trop d'essais rates\./.test(value);
-}
-
-async function hashAccessPassword(value) {
-  if (typeof globalThis.crypto?.subtle?.digest !== "function" || typeof TextEncoder !== "function") {
-    return "";
-  }
-
-  const data = new TextEncoder().encode(String(value || ""));
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", data);
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 function clearLegacyLocalState() {
@@ -1182,6 +1176,10 @@ function getSharedSyncErrorMessage(error) {
 
   if (code === "42P01" || /shared_state/i.test(message)) {
     return "La table Supabase n'existe pas encore. Lancez le script SQL puis rechargez la page.";
+  }
+
+  if (code === "42883" || /verify_site_access/i.test(message)) {
+    return "La fonction d'acces Supabase n'existe pas encore. Lancez le script SQL d'acces puis rechargez la page.";
   }
 
   if (/permission|row-level security|rls|42501/i.test(`${code} ${message}`)) {

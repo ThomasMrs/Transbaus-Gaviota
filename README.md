@@ -59,6 +59,14 @@ supabase/shared_state.sql
 ```
 
 Cela cree la table `public.shared_state` et les policies minimales pour que l'application puisse lire et ecrire son etat partage.
+Le meme script cree aussi une configuration d'acces privee et la fonction RPC `public.verify_site_access(text)` utilisee par l'ecran de connexion.
+
+Important :
+
+- le hash du mot de passe n'est plus stocke dans le frontend
+- apres avoir execute le script, le login verifie le mot de passe cote Supabase
+- le script migre automatiquement le hash actuellement utilise par l'application
+- pour passer plus tard a un hash `bcrypt`, utilisez la commande commentee en bas de `supabase/shared_state.sql`
 
 ## Lancer le site
 
@@ -134,7 +142,7 @@ Important :
 - certaines etiquettes peuvent necessiter une verification manuelle apres lecture automatique
 - un colis enregistre sans numero de commande reste visible dans le site, mais il ne peut pas etre compare automatiquement avec un bon de livraison PDF
 - les fichiers PDF restent stockes dans le navigateur qui les a importes, meme si leur analyse est visible dans l'etat partage
-- les policies fournies dans `supabase/shared_state.sql` privilegient la simplicite, pas une securite forte; pour un vrai controle d'acces, il faut ajouter une authentification utilisateur
+- le mot de passe d'entree est maintenant verifie cote Supabase, mais les donnees metier restent exposees via la cle publique tant que vous ne passez pas a une vraie authentification utilisateur
 
 ## Structure du projet
 

@@ -23,6 +23,18 @@ export function createSharedStateStore(options = {}) {
   });
 
   return {
+    async verifyAccessPassword(password) {
+      const { data, error } = await client.rpc("verify_site_access", {
+        input_password: String(password || ""),
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      return Boolean(data);
+    },
+
     async fetchStateRecord() {
       const sharedRecord = await fetchSharedRecord(client);
       return {
