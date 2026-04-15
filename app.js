@@ -20,6 +20,7 @@ import {
   getSortingEffortLabel,
   getSortingHandlingAdvice,
   normalizeBarcode,
+  normalizeCommandNumber,
   normalizeDestination,
   normalizeDestinationRuleText,
   normalizeParcelData,
@@ -61,6 +62,7 @@ const DEFAULT_COLLAPSE_STATE = {
   flow: false,
   scanner: false,
   baqueForm: false,
+  smallParcels: false,
   search: false,
   savedPages: false,
   deliveryNote: false,
@@ -104,6 +106,7 @@ const scanner = {
   active: false,
   handled: false,
   importingBarcode: false,
+  target: "parcel",
 };
 const ocr = {
   worker: null,
@@ -366,7 +369,7 @@ function getWorkspaceSummary(pageId) {
       title: workspacePage.title,
       createdAt: "",
       updatedAt: "",
-      parcelsCount: state.parcels.length,
+      parcelsCount: state.parcels.length + getSmallParcelCountTotal(),
       baquesCount: state.baques.length,
     };
   }
@@ -590,6 +593,7 @@ function cacheElements() {
   ui.packageIndexInput = document.querySelector("#packageIndexInput");
   ui.barcodeInput = document.querySelector("#barcodeInput");
   ui.openScannerBtn = document.querySelector("#openScannerBtn");
+  ui.openSmallParcelScannerBtn = document.querySelector("#openSmallParcelScannerBtn");
   ui.importBarcodeBtn = document.querySelector("#importBarcodeBtn");
   ui.chooseBarcodeBtn = document.querySelector("#chooseBarcodeBtn");
   ui.scanLabelBtn = document.querySelector("#scanLabelBtn");
@@ -603,6 +607,11 @@ function cacheElements() {
   ui.baqueForm = document.querySelector("#baqueForm");
   ui.baqueNameInput = document.querySelector("#baqueNameInput");
   ui.baqueLocationInput = document.querySelector("#baqueLocationInput");
+  ui.smallParcelForm = document.querySelector("#smallParcelForm");
+  ui.smallParcelBarcodeInput = document.querySelector("#smallParcelBarcodeInput");
+  ui.smallParcelQuantityInput = document.querySelector("#smallParcelQuantityInput");
+  ui.smallParcelSummary = document.querySelector("#smallParcelSummary");
+  ui.smallParcelList = document.querySelector("#smallParcelList");
   ui.searchInput = document.querySelector("#searchInput");
   ui.searchResults = document.querySelector("#searchResults");
   ui.importDeliveryNoteBtn = document.querySelector("#importDeliveryNoteBtn");
@@ -620,6 +629,7 @@ function cacheElements() {
   ui.baquesGrid = document.querySelector("#baquesGrid");
   ui.scannerModal = document.querySelector("#scannerModal");
   ui.reader = document.querySelector("#reader");
+  ui.scannerHelp = document.querySelector(".scanner-help");
   ui.scannerStatus = document.querySelector("#scannerStatus");
   ui.closeScannerBtn = document.querySelector("#closeScannerBtn");
   ui.captureModal = document.querySelector("#captureModal");
@@ -653,6 +663,8 @@ function bindEvents() {
   });
   ui.parcelForm.addEventListener("submit", handleParcelSubmit);
   ui.baqueForm.addEventListener("submit", handleBaqueSubmit);
+  ui.smallParcelForm?.addEventListener("submit", handleSmallParcelSubmit);
+  ui.smallParcelList?.addEventListener("click", handleSmallParcelListClick);
   ui.searchInput.addEventListener("input", renderSearchResults);
   ui.importDeliveryNoteBtn.addEventListener("click", openDeliveryNotePicker);
   ui.deliveryNoteInput.addEventListener("change", (event) => {
@@ -666,6 +678,9 @@ function bindEvents() {
   ui.destinationRulesList.addEventListener("change", handleDestinationRulesChange);
   ui.destinationSummary.addEventListener("click", handleDestinationSummaryClick);
   ui.openScannerBtn?.addEventListener("click", openScanner);
+  ui.openSmallParcelScannerBtn?.addEventListener("click", () => {
+    void openScanner("small-parcel");
+  });
   ui.importBarcodeBtn?.addEventListener("click", openBarcodeCameraPicker);
   ui.chooseBarcodeBtn?.addEventListener("click", openBarcodeLibraryPicker);
   ui.scanLabelBtn.addEventListener("click", openLabelCameraPicker);
@@ -903,6 +918,29 @@ function clearLegacyLocalState() {
   window.localStorage.removeItem(LEGACY_SHARED_SYNC_META_STORAGE_KEY);
 }
 
+function normalizeSmallParcelScan(scan) {
+  const normalizedCode = normalizeBarcode(scan?.barcode || scan?.commandNumber || "");
+  const normalizedParcelData = normalizeParcelData({
+    barcode: normalizedCode,
+    commandNumber: normalizeCommandNumber(scan?.commandNumber || normalizedCode),
+  });
+  const commandNumber = getParcelCommandNumber(normalizedParcelData);
+  if (!commandNumber) {
+    return null;
+  }
+
+  const quantity = clamp(Math.round(Number(scan?.quantity || 1)), 1, 99);
+  const createdAt = normalizeStoredDate(scan?.createdAt || "", new Date().toISOString());
+  return {
+    id: scan?.id || createId(),
+    barcode: normalizedParcelData.barcode || commandNumber,
+    commandNumber,
+    quantity,
+    createdAt,
+    updatedAt: normalizeStoredDate(scan?.updatedAt || createdAt, createdAt),
+  };
+}
+
 function normalizePersistedState(parsed) {
   if (!Array.isArray(parsed?.baques) || !Array.isArray(parsed?.parcels)) {
     return createDefaultState();
@@ -951,10 +989,16 @@ function normalizePersistedState(parsed) {
       .map((rule) => normalizeDestinationRule(rule, { availableBaqueIds }))
       .filter(Boolean)
     : [];
+  const smallParcelScans = Array.isArray(parsed.smallParcelScans)
+    ? parsed.smallParcelScans
+      .map((scan) => normalizeSmallParcelScan(scan))
+      .filter(Boolean)
+    : [];
 
   return {
     baques: baques.length ? baques : fallbackState.baques,
     parcels,
+    smallParcelScans,
     deliveryNotes,
     destinationRules,
   };
@@ -964,6 +1008,7 @@ function hydrateState(nextState) {
   const normalizedState = normalizePersistedState(nextState);
   state.baques.splice(0, state.baques.length, ...normalizedState.baques);
   state.parcels.splice(0, state.parcels.length, ...normalizedState.parcels);
+  state.smallParcelScans.splice(0, state.smallParcelScans.length, ...normalizedState.smallParcelScans);
   state.deliveryNotes.splice(0, state.deliveryNotes.length, ...normalizedState.deliveryNotes);
   state.destinationRules.splice(0, state.destinationRules.length, ...normalizedState.destinationRules);
   return normalizedState;
@@ -979,6 +1024,7 @@ function createDefaultState() {
       createdAt: new Date().toISOString(),
     })),
     parcels: [],
+    smallParcelScans: [],
     deliveryNotes: [],
     destinationRules: [],
   };
@@ -1205,6 +1251,7 @@ function render() {
   renderHeroStats();
   renderBaqueSelect();
   renderWorkspacePages();
+  renderSmallParcelScans();
   renderDestinationRuleTargetOptions();
   renderDestinationRules();
   renderDestinationSummary();
@@ -1227,7 +1274,7 @@ function renderWorkspacePages() {
       title: workspacePage.title,
       createdAt: "",
       updatedAt: "",
-      parcelsCount: state.parcels.length,
+      parcelsCount: state.parcels.length + getSmallParcelCountTotal(),
       baquesCount: state.baques.length,
     }];
 
@@ -1293,7 +1340,7 @@ function safelyRenderSection(renderSection, fallbackRender) {
 
 function renderHeroStats() {
   const totalBaques = state.baques.length;
-  const totalParcels = state.parcels.length;
+  const totalParcels = state.parcels.length + getSmallParcelCountTotal();
   const totalDestinations = getDestinationGroups().length;
 
   ui.heroStats.innerHTML = [
@@ -2128,6 +2175,92 @@ function emptyBaqueTemplate() {
   `;
 }
 
+function getSmallParcelCountTotal(scans = state.smallParcelScans) {
+  return scans.reduce((total, scan) => total + Math.max(1, Number(scan.quantity || 1)), 0);
+}
+
+function expandSmallParcelScansForComparison() {
+  return state.smallParcelScans.flatMap((scan) => {
+    const quantity = Math.max(1, Number(scan.quantity || 1));
+    return Array.from({ length: quantity }, () => ({
+      commandNumber: scan.commandNumber,
+      barcode: scan.barcode || scan.commandNumber,
+      routeCode: "",
+      destination: "",
+      client: "",
+      description: "",
+      routeLabel: "",
+      reference: "",
+      shippingDate: "",
+      weight: "",
+      measuredDimensions: "",
+      packageIndex: "",
+    }));
+  });
+}
+
+function getPdfComparableParcels() {
+  return [...state.parcels, ...expandSmallParcelScansForComparison()];
+}
+
+function renderSmallParcelScans() {
+  if (!ui.smallParcelList || !ui.smallParcelSummary) {
+    return;
+  }
+
+  const totalCount = getSmallParcelCountTotal();
+  const distinctCommands = new Set(state.smallParcelScans.map((scan) => scan.commandNumber)).size;
+  ui.smallParcelSummary.innerHTML = totalCount
+    ? `
+      <span class="distribution-chip">${escapeHtml(String(totalCount))} ${escapeHtml(pluralize(totalCount, "petit colis compte", "petits colis comptes"))}</span>
+      <span class="distribution-chip">${escapeHtml(String(distinctCommands))} ${escapeHtml(pluralize(distinctCommands, "commande", "commandes"))}</span>
+    `
+    : "";
+
+  if (!state.smallParcelScans.length) {
+    ui.smallParcelList.innerHTML = `
+      <article class="empty-card">
+        <p class="empty-state">Aucun petit colis compte pour le moment.</p>
+      </article>
+    `;
+    return;
+  }
+
+  ui.smallParcelList.innerHTML = state.smallParcelScans
+    .slice()
+    .sort((left, right) => new Date(right.updatedAt) - new Date(left.updatedAt))
+    .map((scan) => {
+      const quantity = Math.max(1, Number(scan.quantity || 1));
+      const metaBits = [
+        `Ajoute le ${escapeHtml(formatDate(scan.updatedAt || scan.createdAt))}`,
+        scan.barcode && scan.barcode !== scan.commandNumber ? `Code lu : ${escapeHtml(scan.barcode)}` : "",
+      ].filter(Boolean);
+
+      return `
+        <article class="document-card">
+          <div class="document-card__body">
+            <p class="document-card__title">Commande ${escapeHtml(scan.commandNumber)}</p>
+            <div class="document-summary">
+              <span class="distribution-chip">${escapeHtml(String(quantity))} ${escapeHtml(pluralize(quantity, "petit colis", "petits colis"))}</span>
+            </div>
+            <p class="document-card__meta">${metaBits.join(" • ")}</p>
+          </div>
+          <div class="document-card__actions">
+            <button
+              class="btn btn--danger document-card__action"
+              type="button"
+              data-action="delete-small-parcel-scan"
+              data-small-scan-id="${escapeAttribute(scan.id)}"
+            >
+              Supprimer
+            </button>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
 function renderSearchResults() {
   const query = ui.searchInput.value.trim().toLowerCase();
 
@@ -2310,6 +2443,25 @@ function deliveryNoteTemplate(note) {
 function handleParcelSubmit(event) {
   event.preventDefault();
   upsertParcel();
+}
+
+function handleSmallParcelSubmit(event) {
+  event.preventDefault();
+  upsertSmallParcelScan();
+}
+
+function handleSmallParcelListClick(event) {
+  const button = event.target.closest('[data-action="delete-small-parcel-scan"]');
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  const scanId = button.dataset.smallScanId || "";
+  if (!scanId) {
+    return;
+  }
+
+  deleteSmallParcelScan(scanId);
 }
 
 function handleBaqueSubmit(event) {
@@ -2711,7 +2863,7 @@ async function analyzeDeliveryNote(noteId, providedFile = null) {
       ui.deliveryNoteStatus.textContent = message;
     });
     const entries = parseDeliveryNoteText(extractedText);
-    const analysis = compareDeliveryNoteEntries(entries, state.parcels);
+    const analysis = compareDeliveryNoteEntries(entries, getPdfComparableParcels());
 
     deliveryNote.analysis = {
       ...analysis,
@@ -2829,7 +2981,7 @@ async function simulateDeliveryNoteParcels(noteId) {
 
     invalidateBaqueValidations([...affectedBaqueIds]);
 
-    const analysis = compareDeliveryNoteEntries(entries, state.parcels);
+    const analysis = compareDeliveryNoteEntries(entries, getPdfComparableParcels());
     deliveryNote.analysis = {
       ...analysis,
       analyzedAt: new Date().toISOString(),
@@ -3891,6 +4043,66 @@ function clearParcelForm() {
   ui.routeCodeInput.focus();
 }
 
+function upsertSmallParcelScan(scannedCode = "") {
+  const normalizedCode = normalizeBarcode(scannedCode || ui.smallParcelBarcodeInput?.value || "");
+  const quantity = clamp(Math.round(Number(ui.smallParcelQuantityInput?.value || 1)), 1, 99);
+  const normalizedScan = normalizeSmallParcelScan({
+    barcode: normalizedCode,
+    commandNumber: normalizedCode,
+    quantity,
+  });
+
+  if (!normalizedScan?.commandNumber) {
+    showToast("Scannez un numero de commande ou un code-barres exploitable.", "danger");
+    return false;
+  }
+
+  const now = new Date().toISOString();
+  state.smallParcelScans.unshift({
+    ...normalizedScan,
+    id: createId(),
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  saveState();
+  renderSmallParcelScans();
+  renderDeliveryNotes();
+  clearSmallParcelForm();
+  showToast(
+    `${quantity} ${pluralize(quantity, "petit colis compte", "petits colis comptes")} pour la commande ${normalizedScan.commandNumber}.`,
+  );
+  return true;
+}
+
+function clearSmallParcelForm() {
+  if (ui.smallParcelBarcodeInput) {
+    ui.smallParcelBarcodeInput.value = "";
+  }
+  if (ui.smallParcelQuantityInput) {
+    ui.smallParcelQuantityInput.value = "1";
+  }
+  ui.smallParcelBarcodeInput?.focus();
+}
+
+function deleteSmallParcelScan(scanId) {
+  const scan = state.smallParcelScans.find((item) => item.id === scanId);
+  if (!scan) {
+    return;
+  }
+
+  const quantity = Math.max(1, Number(scan.quantity || 1));
+  if (!window.confirm(`Supprimer ${quantity} ${pluralize(quantity, "petit colis", "petits colis")} de la commande ${scan.commandNumber} ?`)) {
+    return;
+  }
+
+  state.smallParcelScans = state.smallParcelScans.filter((item) => item.id !== scanId);
+  saveState();
+  renderSmallParcelScans();
+  renderDeliveryNotes();
+  showToast(`Scan petits colis ${scan.commandNumber} supprime.`);
+}
+
 function deleteBaque(baqueId) {
   if (state.baques.length === 1) {
     showToast("Vous devez garder au moins une baque.", "danger");
@@ -4036,12 +4248,13 @@ function moveParcel(parcelId) {
   showToast(`Colis ${getParcelIdentifier(parcel)} deplace vers ${nextBaque.name}.`);
 }
 
-async function openScanner() {
+async function openScanner(target = "parcel") {
   if (typeof window.Html5QrcodeScanner === "undefined") {
     showToast("La librairie de scan n'a pas pu etre chargee.", "danger");
     return;
   }
 
+  scanner.target = target === "small-parcel" ? "small-parcel" : "parcel";
   if (scanner.active) {
     ui.scannerModal.classList.remove("hidden");
     ui.scannerModal.setAttribute("aria-hidden", "false");
@@ -4049,6 +4262,11 @@ async function openScanner() {
   }
 
   scanner.handled = false;
+  if (ui.scannerHelp) {
+    ui.scannerHelp.textContent = scanner.target === "small-parcel"
+      ? "Le code scanne alimentera la section Petits colis a part et servira uniquement au comptage du bon de livraison."
+      : "Le colis sera ajoute automatiquement si la baque et le numero destination sont deja remplis. Si besoin, vous pouvez aussi choisir une image du code-barres.";
+  }
   ui.scannerStatus.textContent = "Autorisez la camera ou utilisez le scan par image si besoin.";
   ui.scannerModal.classList.remove("hidden");
   ui.scannerModal.setAttribute("aria-hidden", "false");
@@ -4088,10 +4306,24 @@ async function openScanner() {
         }
 
         scanner.handled = true;
-        ui.barcodeInput.value = decodedText.trim();
-        const added = upsertParcel(decodedText.trim());
+        const normalizedText = decodedText.trim();
+        const added = scanner.target === "small-parcel"
+          ? (() => {
+            if (ui.smallParcelBarcodeInput) {
+              ui.smallParcelBarcodeInput.value = normalizedText;
+            }
+            return upsertSmallParcelScan(normalizedText);
+          })()
+          : (() => {
+            ui.barcodeInput.value = normalizedText;
+            return upsertParcel(normalizedText);
+          })();
         if (!added) {
-          showToast("Code detecte. Completez les champs puis validez.");
+          showToast(
+            scanner.target === "small-parcel"
+              ? "Code detecte. Completez la quantite puis validez."
+              : "Code detecte. Completez les champs puis validez.",
+          );
         }
 
         await closeScanner();
@@ -4100,7 +4332,9 @@ async function openScanner() {
     );
 
     scanner.active = true;
-    ui.scannerStatus.textContent = "Scanner actif. Vous pouvez utiliser la camera ou importer une photo du code.";
+    ui.scannerStatus.textContent = scanner.target === "small-parcel"
+      ? "Scanner actif pour les petits colis. Visez le code de commande."
+      : "Scanner actif. Vous pouvez utiliser la camera ou importer une photo du code.";
   } catch (error) {
     await stopScanner();
     ui.scannerModal.classList.add("hidden");

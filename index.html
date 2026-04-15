@@ -399,6 +399,74 @@
           </div>
         </article>
 
+        <article class="panel panel--collapsible" data-collapsible-key="smallParcels">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Scan rapide</p>
+              <h2>Petits colis a part</h2>
+            </div>
+            <button
+              class="collapse-toggle"
+              type="button"
+              data-collapse-toggle
+              data-collapse-key="smallParcels"
+              aria-expanded="true"
+              aria-label="Reduire la rubrique"
+              aria-controls="smallParcelsPanelBody"
+            >
+              -
+            </button>
+          </div>
+
+          <div id="smallParcelsPanelBody" class="collapsible-body">
+            <form id="smallParcelForm" class="form-stack">
+              <div class="field-grid">
+                <label class="field">
+                  <span>Code-barres / numero de commande</span>
+                  <input
+                    id="smallParcelBarcodeInput"
+                    type="text"
+                    inputmode="numeric"
+                    placeholder="Scannez ou saisissez le code"
+                    required
+                  >
+                </label>
+
+                <label class="field">
+                  <span>Quantite</span>
+                  <input
+                    id="smallParcelQuantityInput"
+                    type="number"
+                    inputmode="numeric"
+                    min="1"
+                    max="99"
+                    step="1"
+                    value="1"
+                    required
+                  >
+                </label>
+              </div>
+
+              <div class="actions">
+                <button class="btn btn--accent" type="submit">
+                  Compter ces petits colis
+                </button>
+                <button id="openSmallParcelScannerBtn" class="btn btn--secondary" type="button">
+                  Scanner un code
+                </button>
+              </div>
+            </form>
+
+            <p class="field-help">
+              Ces petits colis sont comptes uniquement dans le bon de livraison.
+              Ils n'apparaissent pas dans la recherche des colis, les baques ni la vue de tri.
+            </p>
+
+            <div id="smallParcelSummary" class="document-summary"></div>
+            <div id="smallParcelList" class="document-list"></div>
+          </div>
+        </article>
+
         <article class="panel panel--collapsible" data-collapsible-key="search">
           <div class="section-head">
             <div>

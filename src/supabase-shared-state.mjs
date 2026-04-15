@@ -296,7 +296,8 @@ function listPages(sharedPayload, fallbackUpdatedAt = "") {
         title: meta.title || defaultPageTitle(pageId),
         createdAt: meta.createdAt || "",
         updatedAt: meta.updatedAt || fallbackUpdatedAt || "",
-        parcelsCount: Array.isArray(state?.parcels) ? state.parcels.length : 0,
+        parcelsCount: (Array.isArray(state?.parcels) ? state.parcels.length : 0)
+          + countSmallParcelScans(state?.smallParcelScans),
         baquesCount: Array.isArray(state?.baques) ? state.baques.length : 0,
       };
     })
@@ -347,4 +348,12 @@ function createWorkspaceError(code, message) {
   const error = new Error(message);
   error.code = code;
   return error;
+}
+
+function countSmallParcelScans(scans) {
+  if (!Array.isArray(scans)) {
+    return 0;
+  }
+
+  return scans.reduce((total, scan) => total + Math.max(1, Number(scan?.quantity || 1)), 0);
 }
