@@ -38,18 +38,17 @@ import {
   normalizeDeliveryTextLine,
   parseDeliveryNoteText,
 } from "./src/delivery-notes.mjs";
+import { createSharedStateStore } from "./src/supabase-shared-state.mjs";
 
 const LEGACY_STATE_STORAGE_KEY = "transbaus-gaviota-state-v1";
 const COLLAPSE_STORAGE_KEY = "le-baus-du-tri-collapse-v1";
 const ACCESS_STORAGE_KEY = "transbaus-gaviota-access-v1";
 const ACCESS_RATE_LIMIT_STORAGE_KEY = "transbaus-gaviota-access-rate-v1";
 const LEGACY_SHARED_SYNC_META_STORAGE_KEY = "transbaus-gaviota-shared-sync-v1";
-const SHARED_STATE_ENDPOINT = "/api/state";
 const ACCESS_PASSWORD_HASH_SHA256 = "a20a2b7bb0842d5cf8a0c06c626421fd51ec103925c1819a51271f2779afa730";
 const ACCESS_FAILED_ATTEMPTS_LIMIT = 3;
 const ACCESS_LOCK_DURATION_MS = 10_000;
 const SHARED_SYNC_POLL_MS = 8_000;
-const SHARED_SYNC_REQUEST_TIMEOUT_MS = 8_000;
 const LABEL_AUTO_CAPTURE_POLL_MS = 220;
 const LABEL_AUTO_CAPTURE_STABLE_FRAMES = 7;
 const LABEL_AUTO_CAPTURE_KICKOFF_MS = 650;
@@ -116,6 +115,7 @@ const deliveryNoteAnalysis = {
 };
 let pdfjsLibPromise = null;
 let loginLockCountdownId = null;
+let sharedStateStore = null;
 
 document.addEventListener("DOMContentLoaded", () => {
   void initializeApp();
@@ -127,6 +127,12 @@ async function initializeApp() {
   syncAccessGate();
   clearLegacyLocalState();
   syncSharedStateBadge("connecting");
+  try {
+    sharedStateStore = createSharedStateStore();
+  } catch (error) {
+    console.error("Client Supabase indisponible", error);
+    markSharedSyncOffline(error);
+  }
   await initializeSharedStateSync();
   render();
 }
@@ -578,6 +584,10 @@ function syncSharedStateBadge(mode) {
 }
 
 async function initializeSharedStateSync() {
+  if (!sharedStateStore) {
+    return;
+  }
+
   const record = await fetchSharedStateRecord();
   if (record?.state) {
     hydrateState(record.state);
@@ -621,7 +631,7 @@ function queueSharedStateSync() {
 }
 
 async function flushSharedStateSyncQueue() {
-  if (sharedSync.requestInFlight || !sharedSync.pendingPush) {
+  if (!sharedStateStore || sharedSync.requestInFlight || !sharedSync.pendingPush) {
     return;
   }
 
@@ -629,24 +639,12 @@ async function flushSharedStateSyncQueue() {
   sharedSync.pendingPush = false;
 
   try {
-    const response = await requestSharedState(SHARED_STATE_ENDPOINT, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(snapshotState()),
-    });
-
-    if (!response.ok) {
-      throw new Error(`shared-sync-write-${response.status}`);
-    }
-
-    const payload = await response.json();
+    const payload = await sharedStateStore.saveStateRecord(snapshotState());
     sharedSyncMeta.updatedAt = normalizeStoredDate(payload.updatedAt || "", new Date().toISOString());
     markSharedSyncOnline();
   } catch (error) {
     sharedSync.pendingPush = true;
-    markSharedSyncOffline();
+    markSharedSyncOffline(error);
     console.error("Synchronisation BDD impossible", error);
   } finally {
     sharedSync.requestInFlight = false;
@@ -657,7 +655,7 @@ async function flushSharedStateSyncQueue() {
 }
 
 async function pullSharedStateFromServer() {
-  if (sharedSync.requestInFlight) {
+  if (!sharedStateStore || sharedSync.requestInFlight) {
     return;
   }
 
@@ -682,46 +680,21 @@ async function pullSharedStateFromServer() {
 }
 
 async function fetchSharedStateRecord() {
+  if (!sharedStateStore) {
+    return null;
+  }
+
   try {
-    const response = await requestSharedState(SHARED_STATE_ENDPOINT, {
-      method: "GET",
-    });
-
-    if (!response.ok) {
-      throw new Error(`shared-sync-read-${response.status}`);
-    }
-
-    const payload = await response.json();
+    const payload = await sharedStateStore.fetchStateRecord();
     markSharedSyncOnline();
     return {
       state: payload?.state || null,
       updatedAt: normalizeStoredDate(payload?.updatedAt || "", ""),
     };
   } catch (error) {
-    markSharedSyncOffline();
+    markSharedSyncOffline(error);
     console.error("Lecture BDD impossible", error);
     return null;
-  }
-}
-
-async function requestSharedState(url, options = {}) {
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => {
-    controller.abort();
-  }, SHARED_SYNC_REQUEST_TIMEOUT_MS);
-
-  try {
-    return await fetch(url, {
-      ...options,
-      cache: "no-store",
-      signal: controller.signal,
-      headers: {
-        Accept: "application/json",
-        ...(options.headers || {}),
-      },
-    });
-  } finally {
-    window.clearTimeout(timeoutId);
   }
 }
 
@@ -731,7 +704,7 @@ function markSharedSyncOnline() {
   syncSharedStateBadge("shared");
 }
 
-function markSharedSyncOffline() {
+function markSharedSyncOffline(error = null) {
   sharedSync.online = false;
   syncSharedStateBadge("offline");
 
@@ -740,7 +713,26 @@ function markSharedSyncOffline() {
   }
 
   sharedSync.offlineToastShown = true;
-  showToast("La BDD ne repond plus. Aucun scan n'est sauvegarde tant que la connexion n'est pas revenue.", "danger");
+  showToast(getSharedSyncErrorMessage(error), "danger");
+}
+
+function getSharedSyncErrorMessage(error) {
+  const code = String(error?.code || "");
+  const message = normalizeFreeText(String(error?.message || ""));
+
+  if (code === "42P01" || /shared_state/i.test(message)) {
+    return "La table Supabase n'existe pas encore. Lancez le script SQL puis rechargez la page.";
+  }
+
+  if (/permission|row-level security|rls|42501/i.test(`${code} ${message}`)) {
+    return "Supabase refuse l'acces a la table. Verifiez les droits et les policies RLS.";
+  }
+
+  if (/supabase-unavailable/i.test(message)) {
+    return "Le client Supabase n'a pas pu etre charge. Rechargez la page puis reessayez.";
+  }
+
+  return "La BDD cloud ne repond plus. Aucun scan n'est sauvegarde tant que la connexion n'est pas revenue.";
 }
 
 function snapshotState() {

@@ -16,7 +16,7 @@ Le site permet de scanner un code-barres ou une etiquette complete, de ranger ch
 - recherche par code-barres, numero destination, destination, client, reference ou route
 - deplacement d'un colis d'une baque a une autre
 - suppression d'un colis
-- sauvegarde des donnees metier dans une BDD SQLite partagee
+- sauvegarde des donnees metier dans Supabase pour un acces depuis n'importe quel appareil
 
 ## Informations gerees pour un colis
 
@@ -48,7 +48,19 @@ Important :
 - le `numero destination` suffit pour enregistrer un colis
 - pour la comparaison avec un bon de livraison PDF, il faut aussi que le `numero de commande` soit reconnu ou saisi
 
-## Lancer le site en mode partage
+## Configuration Supabase
+
+Les cles publiques Supabase sont configurees dans [src/supabase-shared-state.mjs](src/supabase-shared-state.mjs).
+
+Avant le premier usage, ouvrez l'editeur SQL de Supabase et executez :
+
+```text
+supabase/shared_state.sql
+```
+
+Cela cree la table `public.shared_state` et les policies minimales pour que l'application puisse lire et ecrire son etat partage.
+
+## Lancer le site
 
 Depuis PowerShell, a la racine du projet :
 
@@ -56,11 +68,8 @@ Depuis PowerShell, a la racine du projet :
 npm start
 ```
 
-Le serveur lance :
-
-- l'application web
-- l'API `/api/state`
-- la BDD SQLite dans `data/transbaus.sqlite`
+Le serveur local sert seulement les fichiers statiques.
+Les donnees metier sont synchronisees directement avec Supabase.
 
 Ouvrez ensuite :
 
@@ -74,7 +83,8 @@ Pour le bureau, utilisez l'adresse reseau du PC qui heberge le serveur :
 http://IP_DU_PC:4173
 ```
 
-Dans ce mode, les scans enregistres sur le telephone sont ecrits dans la BDD, et les postes du bureau voient les memes baques / colis.
+Pour un acces public, vous pouvez aussi publier le site statique sur GitHub Pages.
+Dans les deux cas, les scans sont ecrits dans Supabase et deviennent visibles sur tous les appareils.
 
 ## Verifications locales
 
@@ -101,8 +111,8 @@ Fonctionnement :
 
 Important :
 
-- GitHub Pages reste un mode statique
-- la BDD SQLite partagee n'est disponible que via `npm start` sur une machine Node
+- GitHub Pages convient maintenant au mode partage global
+- la synchronisation des donnees passe par Supabase, pas par un serveur Node local
 
 ## Dependances cote navigateur
 
@@ -119,12 +129,12 @@ Important :
 
 ## Limites actuelles
 
-- le mode partage suppose qu'un PC reste allume avec `npm start`
-- il n'y a plus de sauvegarde locale des scans: si le serveur partage est coupe, les nouveaux scans ne sont pas conserves apres fermeture ou rechargement
+- il n'y a plus de sauvegarde locale des scans: si Supabase ou Internet est coupe, les nouveaux scans ne sont pas conserves apres fermeture ou rechargement
 - la qualite de l'OCR depend fortement de la nettete, de la lumiere et du cadrage de la photo
 - certaines etiquettes peuvent necessiter une verification manuelle apres lecture automatique
 - un colis enregistre sans numero de commande reste visible dans le site, mais il ne peut pas etre compare automatiquement avec un bon de livraison PDF
 - les fichiers PDF restent stockes dans le navigateur qui les a importes, meme si leur analyse est visible dans l'etat partage
+- les policies fournies dans `supabase/shared_state.sql` privilegient la simplicite, pas une securite forte; pour un vrai controle d'acces, il faut ajouter une authentification utilisateur
 
 ## Structure du projet
 
@@ -132,11 +142,13 @@ Important :
 .
 |-- .github/workflows/pages.yml
 |-- assets/
-|-- data/
+|-- supabase/
+|   `-- shared_state.sql
 |-- src/
 |   |-- delivery-notes.mjs
 |   |-- label-parser.mjs
 |   |-- parcel-utils.mjs
+|   |-- supabase-shared-state.mjs
 |   `-- shared.mjs
 |-- styles/
 |   |-- components.css
