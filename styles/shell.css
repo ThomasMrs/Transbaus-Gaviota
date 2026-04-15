@@ -289,6 +289,21 @@
   font-weight: 800;
 }
 
+.status-badge[data-sync-state="shared"] {
+  background: rgba(175, 220, 205, 0.38);
+  color: #175b46;
+}
+
+.status-badge[data-sync-state="offline"] {
+  background: rgba(248, 204, 194, 0.45);
+  color: #b34a37;
+}
+
+.status-badge[data-sync-state="connecting"] {
+  background: rgba(248, 229, 187, 0.55);
+  color: #8d6100;
+}
+
 .collapse-toggle {
   display: none;
   align-items: center;

@@ -2,8 +2,10 @@
   "name": "transbaus-gaviota",
   "version": "1.0.0",
   "description": "Application web de tri de colis pour TransBaus / Gaviota.",
-  "main": "app.js",
+  "main": "server.cjs",
   "scripts": {
+    "start": "node server.cjs",
+    "start:watch": "node --watch server.cjs",
     "lint": "eslint .",
     "test": "node --test",
     "check": "npm run lint && npm run test"

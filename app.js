@@ -39,13 +39,17 @@ import {
   parseDeliveryNoteText,
 } from "./src/delivery-notes.mjs";
 
-const STORAGE_KEY = "transbaus-gaviota-state-v1";
+const LEGACY_STATE_STORAGE_KEY = "transbaus-gaviota-state-v1";
 const COLLAPSE_STORAGE_KEY = "le-baus-du-tri-collapse-v1";
 const ACCESS_STORAGE_KEY = "transbaus-gaviota-access-v1";
 const ACCESS_RATE_LIMIT_STORAGE_KEY = "transbaus-gaviota-access-rate-v1";
+const LEGACY_SHARED_SYNC_META_STORAGE_KEY = "transbaus-gaviota-shared-sync-v1";
+const SHARED_STATE_ENDPOINT = "/api/state";
 const ACCESS_PASSWORD_HASH_SHA256 = "a20a2b7bb0842d5cf8a0c06c626421fd51ec103925c1819a51271f2779afa730";
 const ACCESS_FAILED_ATTEMPTS_LIMIT = 3;
 const ACCESS_LOCK_DURATION_MS = 10_000;
+const SHARED_SYNC_POLL_MS = 8_000;
+const SHARED_SYNC_REQUEST_TIMEOUT_MS = 8_000;
 const LABEL_AUTO_CAPTURE_POLL_MS = 220;
 const LABEL_AUTO_CAPTURE_STABLE_FRAMES = 7;
 const LABEL_AUTO_CAPTURE_KICKOFF_MS = 650;
@@ -71,10 +75,20 @@ const DEFAULT_BAQUES = [
   { name: "Baque 4", location: "Zone D" },
 ];
 
-const state = loadState();
+const state = createDefaultState();
 const collapseState = loadCollapseState();
 const accessRateLimit = loadAccessRateLimit();
+const sharedSyncMeta = {
+  updatedAt: "",
+};
 const ui = {};
+const sharedSync = {
+  online: false,
+  pollingId: 0,
+  requestInFlight: false,
+  pendingPush: false,
+  offlineToastShown: false,
+};
 const scanner = {
   instance: null,
   active: false,
@@ -104,11 +118,18 @@ let pdfjsLibPromise = null;
 let loginLockCountdownId = null;
 
 document.addEventListener("DOMContentLoaded", () => {
+  void initializeApp();
+});
+
+async function initializeApp() {
   cacheElements();
   bindEvents();
-  render();
   syncAccessGate();
-});
+  clearLegacyLocalState();
+  syncSharedStateBadge("connecting");
+  await initializeSharedStateSync();
+  render();
+}
 
 function cacheElements() {
   ui.loginGate = document.querySelector("#loginGate");
@@ -117,6 +138,7 @@ function cacheElements() {
   ui.loginStatus = document.querySelector("#loginStatus");
   ui.loginSubmitBtn = ui.loginForm?.querySelector('button[type="submit"]');
   ui.logoutBtn = document.querySelector("#logoutBtn");
+  ui.syncStatusBadge = document.querySelector("#syncStatusBadge");
   ui.heroStats = document.querySelector("#heroStats");
   ui.parcelForm = document.querySelector("#parcelForm");
   ui.parcelBaqueSelect = document.querySelector("#parcelBaqueSelect");
@@ -210,7 +232,12 @@ function bindEvents() {
   ui.captureModal.addEventListener("click", handleModalClick);
   ui.baquesGrid.addEventListener("click", handleBaqueGridClick);
   ui.baquesGrid.addEventListener("change", handleBaqueGridChange);
-  window.addEventListener("beforeunload", () => {
+  window.addEventListener("beforeunload", (event) => {
+    if (sharedSync.pendingPush) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+
     void stopScanner();
     void stopCaptureStream();
     void stopOcrWorker();
@@ -425,69 +452,74 @@ async function hashAccessPassword(value) {
     .join("");
 }
 
-function loadState() {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return createDefaultState();
-    }
+function clearLegacyLocalState() {
+  window.localStorage.removeItem(LEGACY_STATE_STORAGE_KEY);
+  window.localStorage.removeItem(LEGACY_SHARED_SYNC_META_STORAGE_KEY);
+}
 
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed.baques) || !Array.isArray(parsed.parcels)) {
-      return createDefaultState();
-    }
-
-    const baques = parsed.baques.map((baque) => ({
-      id: baque.id || createId(),
-      name: String(baque.name || "Baque"),
-      location: String(baque.location || "Sans emplacement"),
-      validatedAt: normalizeStoredDate(baque.validatedAt || "", ""),
-      createdAt: normalizeStoredDate(baque.createdAt, new Date().toISOString()),
-    }));
-
-    const knownIds = new Set(baques.map((baque) => baque.id));
-    const parcels = parsed.parcels
-      .filter((parcel) => parcel && knownIds.has(parcel.currentBaqueId))
-      .map((parcel) => normalizeParcelData({
-        id: parcel.id || createId(),
-        barcode: String(parcel.barcode || "").trim(),
-        commandNumber: String(parcel.commandNumber || "").trim(),
-        routeCode: String(parcel.routeCode || "").trim().toUpperCase(),
-        destination: String(parcel.destination || "").trim(),
-        client: String(parcel.client || "").trim(),
-        description: String(parcel.description || "").trim(),
-        routeLabel: String(parcel.routeLabel || "").trim(),
-        reference: String(parcel.reference || "").trim(),
-        shippingDate: String(parcel.shippingDate || "").trim(),
-        weight: String(parcel.weight || "").trim(),
-        packageIndex: String(parcel.packageIndex || "").trim(),
-        currentBaqueId: parcel.currentBaqueId,
-        originBaqueId: parcel.originBaqueId || parcel.currentBaqueId,
-        originBaqueLabel: String(parcel.originBaqueLabel || ""),
-        createdAt: normalizeStoredDate(parcel.createdAt, new Date().toISOString()),
-        updatedAt: normalizeStoredDate(parcel.updatedAt || parcel.createdAt, new Date().toISOString()),
-      }))
-      .filter((parcel) => parcel.routeCode || parcel.commandNumber || parcel.barcode || parcel.destination);
-    const deliveryNotes = Array.isArray(parsed.deliveryNotes)
-      ? parsed.deliveryNotes
-        .map((note) => normalizeDeliveryNote(note))
-        .filter(Boolean)
-      : [];
-    const destinationRules = Array.isArray(parsed.destinationRules)
-      ? parsed.destinationRules
-        .map((rule) => normalizeDestinationRule(rule))
-        .filter(Boolean)
-      : [];
-
-    return {
-      baques: baques.length ? baques : createDefaultState().baques,
-      parcels,
-      deliveryNotes,
-      destinationRules,
-    };
-  } catch (error) {
+function normalizePersistedState(parsed) {
+  if (!Array.isArray(parsed?.baques) || !Array.isArray(parsed?.parcels)) {
     return createDefaultState();
   }
+
+  const fallbackState = createDefaultState();
+  const baques = parsed.baques.map((baque) => ({
+    id: baque.id || createId(),
+    name: String(baque.name || "Baque"),
+    location: String(baque.location || "Sans emplacement"),
+    validatedAt: normalizeStoredDate(baque.validatedAt || "", ""),
+    createdAt: normalizeStoredDate(baque.createdAt, new Date().toISOString()),
+  }));
+
+  const availableBaqueIds = new Set(baques.map((baque) => baque.id));
+  const parcels = parsed.parcels
+    .filter((parcel) => parcel && availableBaqueIds.has(parcel.currentBaqueId))
+    .map((parcel) => normalizeParcelData({
+      id: parcel.id || createId(),
+      barcode: String(parcel.barcode || "").trim(),
+      commandNumber: String(parcel.commandNumber || "").trim(),
+      routeCode: String(parcel.routeCode || "").trim().toUpperCase(),
+      destination: String(parcel.destination || "").trim(),
+      client: String(parcel.client || "").trim(),
+      description: String(parcel.description || "").trim(),
+      routeLabel: String(parcel.routeLabel || "").trim(),
+      reference: String(parcel.reference || "").trim(),
+      shippingDate: String(parcel.shippingDate || "").trim(),
+      weight: String(parcel.weight || "").trim(),
+      packageIndex: String(parcel.packageIndex || "").trim(),
+      currentBaqueId: parcel.currentBaqueId,
+      originBaqueId: parcel.originBaqueId || parcel.currentBaqueId,
+      originBaqueLabel: String(parcel.originBaqueLabel || ""),
+      createdAt: normalizeStoredDate(parcel.createdAt, new Date().toISOString()),
+      updatedAt: normalizeStoredDate(parcel.updatedAt || parcel.createdAt, new Date().toISOString()),
+    }))
+    .filter((parcel) => parcel.routeCode || parcel.commandNumber || parcel.barcode || parcel.destination);
+  const deliveryNotes = Array.isArray(parsed.deliveryNotes)
+    ? parsed.deliveryNotes
+      .map((note) => normalizeDeliveryNote(note))
+      .filter(Boolean)
+    : [];
+  const destinationRules = Array.isArray(parsed.destinationRules)
+    ? parsed.destinationRules
+      .map((rule) => normalizeDestinationRule(rule, { availableBaqueIds }))
+      .filter(Boolean)
+    : [];
+
+  return {
+    baques: baques.length ? baques : fallbackState.baques,
+    parcels,
+    deliveryNotes,
+    destinationRules,
+  };
+}
+
+function hydrateState(nextState) {
+  const normalizedState = normalizePersistedState(nextState);
+  state.baques.splice(0, state.baques.length, ...normalizedState.baques);
+  state.parcels.splice(0, state.parcels.length, ...normalizedState.parcels);
+  state.deliveryNotes.splice(0, state.deliveryNotes.length, ...normalizedState.deliveryNotes);
+  state.destinationRules.splice(0, state.destinationRules.length, ...normalizedState.destinationRules);
+  return normalizedState;
 }
 
 function createDefaultState() {
@@ -526,7 +558,197 @@ function saveCollapseState() {
 }
 
 function saveState() {
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  queueSharedStateSync();
+}
+
+function syncSharedStateBadge(mode) {
+  if (!ui.syncStatusBadge) {
+    return;
+  }
+
+  const labels = {
+    connecting: "Connexion BDD...",
+    offline: "BDD hors ligne",
+    shared: "BDD partagee",
+    required: "BDD requise",
+  };
+
+  ui.syncStatusBadge.dataset.syncState = mode;
+  ui.syncStatusBadge.textContent = labels[mode] || labels.required;
+}
+
+async function initializeSharedStateSync() {
+  const record = await fetchSharedStateRecord();
+  if (record?.state) {
+    hydrateState(record.state);
+    sharedSyncMeta.updatedAt = record.updatedAt;
+  } else if (record) {
+    sharedSync.pendingPush = true;
+    await flushSharedStateSyncQueue();
+  }
+
+  startSharedStatePolling();
+}
+
+function startSharedStatePolling() {
+  if (sharedSync.pollingId) {
+    return;
+  }
+
+  sharedSync.pollingId = window.setInterval(() => {
+    void pollSharedState();
+  }, SHARED_SYNC_POLL_MS);
+}
+
+async function pollSharedState() {
+  if (sharedSync.requestInFlight) {
+    return;
+  }
+
+  if (sharedSync.pendingPush) {
+    await flushSharedStateSyncQueue();
+    return;
+  }
+
+  await pullSharedStateFromServer();
+}
+
+function queueSharedStateSync() {
+  sharedSync.pendingPush = true;
+  if (sharedSync.online) {
+    void flushSharedStateSyncQueue();
+  }
+}
+
+async function flushSharedStateSyncQueue() {
+  if (sharedSync.requestInFlight || !sharedSync.pendingPush) {
+    return;
+  }
+
+  sharedSync.requestInFlight = true;
+  sharedSync.pendingPush = false;
+
+  try {
+    const response = await requestSharedState(SHARED_STATE_ENDPOINT, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(snapshotState()),
+    });
+
+    if (!response.ok) {
+      throw new Error(`shared-sync-write-${response.status}`);
+    }
+
+    const payload = await response.json();
+    sharedSyncMeta.updatedAt = normalizeStoredDate(payload.updatedAt || "", new Date().toISOString());
+    markSharedSyncOnline();
+  } catch (error) {
+    sharedSync.pendingPush = true;
+    markSharedSyncOffline();
+    console.error("Synchronisation BDD impossible", error);
+  } finally {
+    sharedSync.requestInFlight = false;
+    if (sharedSync.online && sharedSync.pendingPush) {
+      void flushSharedStateSyncQueue();
+    }
+  }
+}
+
+async function pullSharedStateFromServer() {
+  if (sharedSync.requestInFlight) {
+    return;
+  }
+
+  sharedSync.requestInFlight = true;
+
+  try {
+    const record = await fetchSharedStateRecord();
+    if (!record?.state) {
+      return;
+    }
+
+    if (record.updatedAt && record.updatedAt === sharedSyncMeta.updatedAt) {
+      return;
+    }
+
+    hydrateState(record.state);
+    sharedSyncMeta.updatedAt = record.updatedAt;
+    render();
+  } finally {
+    sharedSync.requestInFlight = false;
+  }
+}
+
+async function fetchSharedStateRecord() {
+  try {
+    const response = await requestSharedState(SHARED_STATE_ENDPOINT, {
+      method: "GET",
+    });
+
+    if (!response.ok) {
+      throw new Error(`shared-sync-read-${response.status}`);
+    }
+
+    const payload = await response.json();
+    markSharedSyncOnline();
+    return {
+      state: payload?.state || null,
+      updatedAt: normalizeStoredDate(payload?.updatedAt || "", ""),
+    };
+  } catch (error) {
+    markSharedSyncOffline();
+    console.error("Lecture BDD impossible", error);
+    return null;
+  }
+}
+
+async function requestSharedState(url, options = {}) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => {
+    controller.abort();
+  }, SHARED_SYNC_REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      cache: "no-store",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        ...(options.headers || {}),
+      },
+    });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+function markSharedSyncOnline() {
+  sharedSync.online = true;
+  sharedSync.offlineToastShown = false;
+  syncSharedStateBadge("shared");
+}
+
+function markSharedSyncOffline() {
+  sharedSync.online = false;
+  syncSharedStateBadge("offline");
+
+  if (sharedSync.offlineToastShown) {
+    return;
+  }
+
+  sharedSync.offlineToastShown = true;
+  showToast("La BDD ne repond plus. Aucun scan n'est sauvegarde tant que la connexion n'est pas revenue.", "danger");
+}
+
+function snapshotState() {
+  if (typeof globalThis.structuredClone === "function") {
+    return globalThis.structuredClone(state);
+  }
+
+  return JSON.parse(JSON.stringify(state));
 }
 
 function render() {
@@ -3503,7 +3725,7 @@ function pickRandomBaque(baques) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
-function normalizeDestinationRule(rule) {
+function normalizeDestinationRule(rule, options = {}) {
   if (!rule) {
     return null;
   }
@@ -3518,7 +3740,7 @@ function normalizeDestinationRule(rule) {
     id: String(rule.id || createId()),
     label,
     matchMode: normalizeDestinationRuleMatchMode(rule.matchMode),
-    preferredBaqueId: normalizeDestinationRuleTargetBaqueId(rule.preferredBaqueId || ""),
+    preferredBaqueId: normalizeDestinationRuleTargetBaqueId(rule.preferredBaqueId || "", options.availableBaqueIds),
     patterns,
     createdAt: rule.createdAt || new Date().toISOString(),
   };
@@ -3528,8 +3750,16 @@ function normalizeDestinationRuleMatchMode(value) {
   return value === "all" ? "all" : "any";
 }
 
-function normalizeDestinationRuleTargetBaqueId(value) {
+function normalizeDestinationRuleTargetBaqueId(value, availableBaqueIds = null) {
   const baqueId = String(value || "").trim();
+  if (!baqueId) {
+    return "";
+  }
+
+  if (availableBaqueIds instanceof Set) {
+    return availableBaqueIds.has(baqueId) ? baqueId : "";
+  }
+
   return hasBaqueId(baqueId) ? baqueId : "";
 }
 

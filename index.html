@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta
     name="description"
-    content="Application locale de tri de colis par baques avec scan de code-barres, recherche et suivi par destination."
+    content="Application de tri de colis par baques avec scan de code-barres, recherche et suivi partage en BDD."
   >
   <meta name="application-name" content="Le Baus du Tri">
   <title>Le Baus du Tri</title>
@@ -128,7 +128,7 @@
               <h2>Scanner un colis</h2>
             </div>
             <div class="section-head__actions">
-              <span class="status-badge">Sauvegarde locale</span>
+              <span id="syncStatusBadge" class="status-badge" data-sync-state="connecting">BDD requise</span>
               <button
                 class="collapse-toggle"
                 type="button"

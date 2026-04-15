@@ -16,7 +16,7 @@ Le site permet de scanner un code-barres ou une etiquette complete, de ranger ch
 - recherche par code-barres, numero destination, destination, client, reference ou route
 - deplacement d'un colis d'une baque a une autre
 - suppression d'un colis
-- sauvegarde automatique dans le navigateur via `localStorage`
+- sauvegarde des donnees metier dans une BDD SQLite partagee
 
 ## Informations gerees pour un colis
 
@@ -48,21 +48,33 @@ Important :
 - le `numero destination` suffit pour enregistrer un colis
 - pour la comparaison avec un bon de livraison PDF, il faut aussi que le `numero de commande` soit reconnu ou saisi
 
-## Lancer le site en local
+## Lancer le site en mode partage
 
 Depuis PowerShell, a la racine du projet :
 
 ```powershell
-.\serve-local.ps1
+npm start
 ```
 
-Puis ouvrir :
+Le serveur lance :
+
+- l'application web
+- l'API `/api/state`
+- la BDD SQLite dans `data/transbaus.sqlite`
+
+Ouvrez ensuite :
 
 ```text
 http://localhost:4173
 ```
 
-Le scan camera fonctionne mieux via `localhost` que via l'ouverture directe de `index.html`.
+Pour le bureau, utilisez l'adresse reseau du PC qui heberge le serveur :
+
+```text
+http://IP_DU_PC:4173
+```
+
+Dans ce mode, les scans enregistres sur le telephone sont ecrits dans la BDD, et les postes du bureau voient les memes baques / colis.
 
 ## Verifications locales
 
@@ -87,6 +99,11 @@ Fonctionnement :
 - deploiement du site statique sans build frontend
 - configuration prevue pour limiter les warnings lies a la migration Node 24 des GitHub Actions
 
+Important :
+
+- GitHub Pages reste un mode statique
+- la BDD SQLite partagee n'est disponible que via `npm start` sur une machine Node
+
 ## Dependances cote navigateur
 
 Le projet utilise :
@@ -102,10 +119,12 @@ Important :
 
 ## Limites actuelles
 
-- les donnees sont stockees localement dans le navigateur, elles ne sont pas partagees entre plusieurs telephones ou ordinateurs
+- le mode partage suppose qu'un PC reste allume avec `npm start`
+- il n'y a plus de sauvegarde locale des scans: si le serveur partage est coupe, les nouveaux scans ne sont pas conserves apres fermeture ou rechargement
 - la qualite de l'OCR depend fortement de la nettete, de la lumiere et du cadrage de la photo
 - certaines etiquettes peuvent necessiter une verification manuelle apres lecture automatique
 - un colis enregistre sans numero de commande reste visible dans le site, mais il ne peut pas etre compare automatiquement avec un bon de livraison PDF
+- les fichiers PDF restent stockes dans le navigateur qui les a importes, meme si leur analyse est visible dans l'etat partage
 
 ## Structure du projet
 
@@ -113,6 +132,7 @@ Important :
 .
 |-- .github/workflows/pages.yml
 |-- assets/
+|-- data/
 |-- src/
 |   |-- delivery-notes.mjs
 |   |-- label-parser.mjs
@@ -130,6 +150,7 @@ Important :
 |-- app.js
 |-- eslint.config.mjs
 |-- index.html
+|-- server.cjs
 |-- serve-local.ps1
 |-- styles.css
 ```
