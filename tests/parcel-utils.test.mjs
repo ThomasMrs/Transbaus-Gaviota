@@ -17,6 +17,7 @@ test("normalizeParcelData derives command number and route code", () => {
     routeLabel: "R4 TRANSBAUS 4 - Zone 47 Lot-et-Garonne",
     shippingDate: "25/03/2026",
     weight: "49,41 Kg",
+    measuredDimensions: " 220 x 80 x 15 cm ",
     packageIndex: "1/2",
   });
 
@@ -24,6 +25,7 @@ test("normalizeParcelData derives command number and route code", () => {
   assert.equal(parcel.routeCode, "R447500");
   assert.equal(parcel.destination, "47500 Saint-Vite");
   assert.equal(parcel.packageIndex, "1/2");
+  assert.equal(parcel.measuredDimensions, "220 x 80 x 15 cm");
 });
 
 test("findExistingParcel matches the exact package within a command", () => {

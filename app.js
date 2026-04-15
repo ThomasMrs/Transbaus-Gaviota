@@ -156,6 +156,7 @@ function cacheElements() {
   ui.referenceInput = document.querySelector("#referenceInput");
   ui.shippingDateInput = document.querySelector("#shippingDateInput");
   ui.weightInput = document.querySelector("#weightInput");
+  ui.measuredDimensionsInput = document.querySelector("#measuredDimensionsInput");
   ui.packageIndexInput = document.querySelector("#packageIndexInput");
   ui.barcodeInput = document.querySelector("#barcodeInput");
   ui.openScannerBtn = document.querySelector("#openScannerBtn");
@@ -492,6 +493,7 @@ function normalizePersistedState(parsed) {
       reference: String(parcel.reference || "").trim(),
       shippingDate: String(parcel.shippingDate || "").trim(),
       weight: String(parcel.weight || "").trim(),
+      measuredDimensions: String(parcel.measuredDimensions || "").trim(),
       packageIndex: String(parcel.packageIndex || "").trim(),
       currentBaqueId: parcel.currentBaqueId,
       originBaqueId: parcel.originBaqueId || parcel.currentBaqueId,
@@ -1497,6 +1499,7 @@ function parcelTemplate(parcel) {
     parcel.client ? `Client : ${escapeHtml(parcel.client)}` : "",
     parcel.packageIndex ? `Colis : ${escapeHtml(parcel.packageIndex)}` : "",
     parcel.weight ? `Poids : ${escapeHtml(parcel.weight)}` : "",
+    parcel.measuredDimensions ? `Mesures reelles : ${escapeHtml(parcel.measuredDimensions)}` : "",
   ]
     .filter(Boolean)
     .join("<br>");
@@ -1587,6 +1590,7 @@ function renderSearchResults() {
       parcel.reference || "",
       parcel.shippingDate || "",
       parcel.weight || "",
+      parcel.measuredDimensions || "",
       parcel.packageIndex || "",
       baque?.name || "",
       baque?.location || "",
@@ -1627,6 +1631,7 @@ function renderSearchResults() {
             ${parcel.reference ? `<span><strong>Reference :</strong> ${escapeHtml(parcel.reference)}</span>` : ""}
             ${parcel.packageIndex ? `<span><strong>Colis :</strong> ${escapeHtml(parcel.packageIndex)}</span>` : ""}
             ${parcel.weight ? `<span><strong>Poids :</strong> ${escapeHtml(parcel.weight)}</span>` : ""}
+            ${parcel.measuredDimensions ? `<span><strong>Mesures reelles :</strong> ${escapeHtml(parcel.measuredDimensions)}</span>` : ""}
             ${parcel.shippingDate ? `<span><strong>Date :</strong> ${escapeHtml(parcel.shippingDate)}</span>` : ""}
             <span><strong>Baque actuelle :</strong> ${escapeHtml(baque?.name || "Baque supprimee")}</span>
             <span><strong>Emplacement :</strong> ${escapeHtml(baque?.location || "Inconnu")}</span>
@@ -3180,6 +3185,10 @@ function applyParsedLabelData(parsed) {
     ui.weightInput.value = parsed.weight;
   }
 
+  if (parsed.measuredDimensions) {
+    ui.measuredDimensionsInput.value = parsed.measuredDimensions;
+  }
+
   if (parsed.packageIndex) {
     ui.packageIndexInput.value = parsed.packageIndex;
   }
@@ -3199,6 +3208,7 @@ function upsertParcel(scannedBarcode = "") {
   const reference = normalizeFreeText(ui.referenceInput.value);
   const shippingDate = normalizeFreeText(ui.shippingDateInput.value);
   const weight = normalizeFreeText(ui.weightInput.value);
+  const measuredDimensions = normalizeFreeText(ui.measuredDimensionsInput.value);
   const packageIndex = normalizeFreeText(ui.packageIndexInput.value);
   const barcode = normalizeBarcode(scannedBarcode || ui.barcodeInput.value);
   const normalizedParcelData = normalizeParcelData({
@@ -3211,6 +3221,7 @@ function upsertParcel(scannedBarcode = "") {
     reference,
     shippingDate,
     weight,
+    measuredDimensions,
     packageIndex,
   });
 
@@ -3242,6 +3253,7 @@ function upsertParcel(scannedBarcode = "") {
     existing.reference = normalizedParcelData.reference;
     existing.shippingDate = normalizedParcelData.shippingDate;
     existing.weight = normalizedParcelData.weight;
+    existing.measuredDimensions = normalizedParcelData.measuredDimensions;
     existing.packageIndex = normalizedParcelData.packageIndex;
     existing.currentBaqueId = baqueId;
     existing.updatedAt = now;
@@ -3270,6 +3282,7 @@ function upsertParcel(scannedBarcode = "") {
     reference: normalizedParcelData.reference,
     shippingDate: normalizedParcelData.shippingDate,
     weight: normalizedParcelData.weight,
+    measuredDimensions: normalizedParcelData.measuredDimensions,
     packageIndex: normalizedParcelData.packageIndex,
     currentBaqueId: baqueId,
     originBaqueId: baqueId,
@@ -3299,6 +3312,7 @@ function clearParcelForm() {
   ui.referenceInput.value = "";
   ui.shippingDateInput.value = "";
   ui.weightInput.value = "";
+  ui.measuredDimensionsInput.value = "";
   ui.packageIndexInput.value = "";
   ui.barcodeInput.value = "";
   ui.ocrStatus.textContent = "";
@@ -3791,6 +3805,7 @@ function upsertSimulatedParcel(parcelData, baqueId) {
     existing.reference = normalizedParcelData.reference;
     existing.shippingDate = normalizedParcelData.shippingDate;
     existing.weight = normalizedParcelData.weight;
+    existing.measuredDimensions = normalizedParcelData.measuredDimensions;
     existing.packageIndex = normalizedParcelData.packageIndex;
     existing.currentBaqueId = baqueId;
     existing.updatedAt = now;
@@ -3813,6 +3828,7 @@ function upsertSimulatedParcel(parcelData, baqueId) {
     reference: normalizedParcelData.reference,
     shippingDate: normalizedParcelData.shippingDate,
     weight: normalizedParcelData.weight,
+    measuredDimensions: normalizedParcelData.measuredDimensions,
     packageIndex: normalizedParcelData.packageIndex,
     currentBaqueId: baqueId,
     originBaqueId: baqueId,

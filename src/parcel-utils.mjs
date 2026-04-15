@@ -63,6 +63,7 @@ export function normalizeParcelData(parcel) {
     reference: normalizeFreeText(parcel.reference || ""),
     shippingDate,
     weight: normalizeFreeText(parcel.weight || ""),
+    measuredDimensions: normalizeFreeText(parcel.measuredDimensions || ""),
     packageIndex,
   };
 }
