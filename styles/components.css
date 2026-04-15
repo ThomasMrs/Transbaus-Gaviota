@@ -42,6 +42,7 @@
 .document-card {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .document-card--active {
@@ -58,9 +59,11 @@
 
 .document-card__topline {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
+  min-width: 0;
 }
 
 .document-card__badges {
@@ -68,6 +71,7 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+  min-width: 0;
 }
 
 .document-card__actions {
@@ -84,6 +88,7 @@
 .document-card--workspace {
   gap: 12px;
   padding: 18px 18px 16px;
+  overflow: hidden;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 251, 253, 0.94)),
     linear-gradient(145deg, rgba(154, 200, 235, 0.08), rgba(220, 239, 230, 0.12));
@@ -109,6 +114,7 @@
   color: var(--text-soft);
   font-size: 0.92rem;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .document-card__meta {
@@ -144,10 +150,9 @@
 }
 
 .document-card__footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
+  display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 .document-card__footer--workspace {
@@ -162,6 +167,20 @@
 .document-card--workspace .distribution-chip,
 .document-card--workspace .status-badge {
   white-space: nowrap;
+}
+
+.document-card--workspace .document-summary {
+  min-width: 0;
+}
+
+.document-card__actions--workspace {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.document-card__action--workspace {
+  flex: 0 1 auto;
+  max-width: 100%;
 }
 
 .distribution-chip--alert {
