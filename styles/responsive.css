@@ -5,6 +5,10 @@
     grid-template-columns: 1fr;
   }
 
+  body:not(.app-desk-mode) .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
   .dashboard-grid > [data-app-view] {
     grid-column: auto !important;
     grid-row: auto !important;
@@ -79,19 +83,6 @@
     grid-template-columns: 1fr;
   }
 
-  .panel--collapsible > .section-head,
-  .section-block--collapsible > .section-head,
-  .panel--highlight.panel--collapsible > .hero__side-head {
-    flex-direction: row;
-    align-items: flex-start;
-  }
-
-  .panel--collapsible > .section-head .section-head__actions {
-    flex-direction: row;
-    align-items: center;
-    margin-left: auto;
-  }
-
   .panel--collapsible.is-collapsed .section-head,
   .panel--collapsible.is-collapsed .hero__side-head,
   .section-block--collapsible.is-collapsed .section-head {
@@ -139,6 +130,28 @@
   .actions,
   .move-group {
     flex-direction: column;
+  }
+
+  .panel--collapsible > .section-head,
+  .section-block--collapsible > .section-head,
+  .panel--highlight.panel--collapsible > .hero__side-head {
+    flex-direction: row;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .panel--collapsible > .section-head > div:first-child,
+  .section-block--collapsible > .section-head > div:first-child {
+    min-width: 0;
+    flex: 1 1 0;
+  }
+
+  .panel--collapsible > .section-head .section-head__actions {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    margin-left: auto;
+    flex: 0 0 auto;
   }
 
   .btn,
