@@ -478,6 +478,10 @@ function isWorkspaceReadOnly() {
   return deskMode || isCurrentWorkspaceArchived();
 }
 
+function canEditDeliveryNotes() {
+  return !isCurrentWorkspaceArchived();
+}
+
 function ensureWorkspaceEditable(message = "Cette page est en lecture seule.") {
   if (!isWorkspaceReadOnly()) {
     return true;
@@ -1791,7 +1795,6 @@ function syncReadOnlyUi() {
     "#destinationRulesList input, #destinationRulesList select, #destinationRulesList textarea, #destinationRulesList button",
     "#destinationSummary button",
     "#baquesGrid input, #baquesGrid select, #baquesGrid button",
-    "#deliveryNotePanelBody button, #deliveryNoteInput",
   ];
 
   selectors.forEach((selector) => {
@@ -1800,6 +1803,13 @@ function syncReadOnlyUi() {
         element.disabled = isReadOnly;
       }
     });
+  });
+
+  const deliveryNotesReadOnly = !canEditDeliveryNotes();
+  document.querySelectorAll("#deliveryNotePanelBody button, #deliveryNoteInput").forEach((element) => {
+    if ("disabled" in element) {
+      element.disabled = deliveryNotesReadOnly;
+    }
   });
 }
 
@@ -3577,14 +3587,16 @@ function applyCollapseStateToDom() {
 }
 
 function openDeliveryNotePicker() {
-  if (!ensureWorkspaceEditable("Cette page archivee ne peut plus importer de PDF.")) {
+  if (!canEditDeliveryNotes()) {
+    showToast("Cette page archivee ne peut plus importer de PDF.", "danger");
     return;
   }
   ui.deliveryNoteInput.click();
 }
 
 async function handleDeliveryNoteImport(event) {
-  if (!ensureWorkspaceEditable("Cette page archivee ne peut plus importer de PDF.")) {
+  if (!canEditDeliveryNotes()) {
+    showToast("Cette page archivee ne peut plus importer de PDF.", "danger");
     ui.deliveryNoteInput.value = "";
     return;
   }
@@ -3649,7 +3661,8 @@ async function handleDeliveryNoteImport(event) {
 }
 
 async function handleDeliveryNoteListClick(event) {
-  if (!ensureWorkspaceEditable("Cette page archivee ne peut plus modifier les PDF.")) {
+  if (!canEditDeliveryNotes()) {
+    showToast("Cette page archivee ne peut plus modifier les PDF.", "danger");
     return;
   }
 
