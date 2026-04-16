@@ -1927,6 +1927,7 @@ function renderDeskView() {
           <span class="distribution-chip">${escapeHtml(parcel.baqueName || "Sans baque")}</span>
           ${parcel.commandNumber ? `<span class="distribution-chip">${escapeHtml(parcel.commandNumber)}</span>` : ""}
           ${parcel.client ? `<span class="distribution-chip">${escapeHtml(parcel.client)}</span>` : ""}
+          ${parcel.measuredDimensions ? `<span class="distribution-chip">${escapeHtml(parcel.measuredDimensions)}</span>` : ""}
         </div>
         <p class="document-card__meta document-card__meta--workspace">
           ${escapeHtml(parcel.destination || "Sans destination")} • Mise a jour ${escapeHtml(formatDate(parcel.updatedAt || parcel.createdAt))}
@@ -1961,6 +1962,7 @@ function collectDeskParcels(pages) {
         commandNumber: parcel.commandNumber || "",
         barcode: parcel.barcode || "",
         client: parcel.client || "",
+        measuredDimensions: parcel.measuredDimensions || "",
         destination: getParcelDestinationDisplay(parcel),
         baqueName: baqueMap.get(parcel.currentBaqueId)?.name || "Baque supprimee",
         updatedAt: parcel.updatedAt || parcel.createdAt,
