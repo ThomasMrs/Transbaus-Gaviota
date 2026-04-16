@@ -44,6 +44,7 @@ import { createSharedStateStore } from "./src/supabase-shared-state.mjs";
 const LEGACY_STATE_STORAGE_KEY = "transbaus-gaviota-state-v1";
 const COLLAPSE_STORAGE_KEY = "le-baus-du-tri-collapse-v2";
 const ACCESS_RATE_LIMIT_STORAGE_KEY = "transbaus-gaviota-access-rate-v1";
+const ACCESS_EMAIL_STORAGE_KEY = "transbaus-gaviota-access-email-v1";
 const LEGACY_SHARED_SYNC_META_STORAGE_KEY = "transbaus-gaviota-shared-sync-v1";
 const ACCESS_FAILED_ATTEMPTS_LIMIT = 3;
 const ACCESS_LOCK_DURATION_MS = 10_000;
@@ -76,6 +77,7 @@ const DEFAULT_BAQUES = [
 ];
 
 const workspacePage = getWorkspacePageContext();
+const deskMode = isDeskModeEnabled();
 const state = createDefaultState();
 const workspaceLibrary = {
   pages: [],
@@ -93,6 +95,10 @@ const sharedSyncMeta = {
   updatedAt: "",
 };
 const ui = {};
+const accessContext = {
+  user: null,
+};
+const syncConflicts = [];
 const sharedSync = {
   online: false,
   pollingId: 0,
@@ -138,6 +144,7 @@ document.addEventListener("DOMContentLoaded", () => {
 async function initializeApp() {
   cacheElements();
   bindEvents();
+  hydrateLoginEmailInput();
   syncWorkspacePageUi();
   clearLegacyLocalState();
   syncSharedStateBadge("required");
@@ -177,6 +184,11 @@ function getWorkspacePageContext() {
   };
 }
 
+function isDeskModeEnabled() {
+  const params = new URLSearchParams(globalThis.location?.search || "");
+  return params.get("desk") === "1";
+}
+
 function normalizeWorkspacePageId(value) {
   return String(value || "")
     .trim()
@@ -188,12 +200,17 @@ function normalizeWorkspacePageId(value) {
 
 function syncWorkspacePageUi() {
   const titleSuffix = workspacePage.isPrimary ? "" : ` - ${workspacePage.title}`;
-  document.title = `Le Baus du Tri${titleSuffix}`;
+  const deskSuffix = deskMode ? " - Mode bureau" : "";
+  document.title = `Le Baus du Tri${titleSuffix}${deskSuffix}`;
 
   if (ui.workspaceBadge) {
     ui.workspaceBadge.textContent = workspacePage.isPrimary
       ? "Page principale"
       : `Page ${workspacePage.title}`;
+  }
+
+  if (ui.toggleDeskModeBtn) {
+    ui.toggleDeskModeBtn.textContent = deskMode ? "Quitter le mode bureau" : "Mode bureau";
   }
 }
 
@@ -235,6 +252,29 @@ function buildWorkspacePageUrl(pageId, title = "") {
   }
   url.hash = "";
   return url.toString();
+}
+
+function buildDeskModeUrl(isEnabled, pageId = workspacePage.id, title = workspacePage.title) {
+  const url = new URL(buildWorkspacePageUrl(pageId, title));
+  if (isEnabled) {
+    url.searchParams.set("desk", "1");
+  } else {
+    url.searchParams.delete("desk");
+  }
+  return url.toString();
+}
+
+function toggleDeskMode() {
+  window.location.assign(buildDeskModeUrl(!deskMode));
+}
+
+function hydrateLoginEmailInput() {
+  if (!ui.loginEmailInput) {
+    return;
+  }
+
+  const storedEmail = window.localStorage.getItem(ACCESS_EMAIL_STORAGE_KEY) || "";
+  ui.loginEmailInput.value = storedEmail || "site-access@transbaus.local";
 }
 
 function openWorkspaceCreateModal() {
@@ -368,12 +408,32 @@ function getWorkspaceSummary(pageId) {
       title: workspacePage.title,
       createdAt: "",
       updatedAt: "",
+      archivedAt: "",
+      archivedBy: "",
       parcelsCount: state.parcels.length + getSmallParcelCountTotal(),
       baquesCount: state.baques.length,
+      state: snapshotState(),
     };
   }
 
   return null;
+}
+
+function isCurrentWorkspaceArchived() {
+  return Boolean(getWorkspaceSummary(workspacePage.id)?.archivedAt);
+}
+
+function isWorkspaceReadOnly() {
+  return deskMode || isCurrentWorkspaceArchived();
+}
+
+function ensureWorkspaceEditable(message = "Cette page est en lecture seule.") {
+  if (!isWorkspaceReadOnly()) {
+    return true;
+  }
+
+  showToast(message, "danger");
+  return false;
 }
 
 function syncCurrentWorkspaceFromLibrary() {
@@ -428,6 +488,86 @@ function getWorkspaceActionErrorMessage(error, fallbackMessage) {
   }
 
   return fallbackMessage;
+}
+
+async function archiveWorkspacePage(pageId) {
+  if (!sharedStateStore) {
+    showToast("La BDD cloud est indisponible pour l'instant.", "danger");
+    return;
+  }
+
+  const page = getWorkspaceSummary(pageId);
+  if (!page || page.id === "global") {
+    showToast("Cette page ne peut pas etre archivee.", "danger");
+    return;
+  }
+
+  try {
+    await waitForSharedSyncIdle();
+    if (sharedSync.pendingPush) {
+      await flushSharedStateSyncQueue();
+    }
+
+    sharedSync.requestInFlight = true;
+    const payload = await sharedStateStore.archivePage(page.id, getCurrentActor());
+    sharedSyncMeta.updatedAt = normalizeStoredDate(payload.updatedAt || "", new Date().toISOString());
+    workspaceLibrary.pages = payload.pages || workspaceLibrary.pages;
+    syncCurrentWorkspaceFromLibrary();
+    renderWorkspacePages();
+    renderWorkspaceStateBanner();
+    syncReadOnlyUi();
+    markSharedSyncOnline();
+    showToast(`Page "${page.title}" archivee.`);
+  } catch (error) {
+    console.error("Archivage de page impossible", error);
+    if (/^(workspace-|shared-sync-busy)/.test(String(error?.code || ""))) {
+      showToast(getWorkspaceActionErrorMessage(error, "Impossible d'archiver cette page pour le moment."), "danger");
+    } else {
+      markSharedSyncOffline(error);
+    }
+  } finally {
+    sharedSync.requestInFlight = false;
+  }
+}
+
+async function restoreWorkspacePage(pageId) {
+  if (!sharedStateStore) {
+    showToast("La BDD cloud est indisponible pour l'instant.", "danger");
+    return;
+  }
+
+  const page = getWorkspaceSummary(pageId);
+  if (!page || page.id === "global") {
+    showToast("Cette page ne peut pas etre restauree.", "danger");
+    return;
+  }
+
+  try {
+    await waitForSharedSyncIdle();
+    if (sharedSync.pendingPush) {
+      await flushSharedStateSyncQueue();
+    }
+
+    sharedSync.requestInFlight = true;
+    const payload = await sharedStateStore.restorePage(page.id);
+    sharedSyncMeta.updatedAt = normalizeStoredDate(payload.updatedAt || "", new Date().toISOString());
+    workspaceLibrary.pages = payload.pages || workspaceLibrary.pages;
+    syncCurrentWorkspaceFromLibrary();
+    renderWorkspacePages();
+    renderWorkspaceStateBanner();
+    syncReadOnlyUi();
+    markSharedSyncOnline();
+    showToast(`Page "${page.title}" restauree.`);
+  } catch (error) {
+    console.error("Restauration de page impossible", error);
+    if (/^(workspace-|shared-sync-busy)/.test(String(error?.code || ""))) {
+      showToast(getWorkspaceActionErrorMessage(error, "Impossible de restaurer cette page pour le moment."), "danger");
+    } else {
+      markSharedSyncOffline(error);
+    }
+  } finally {
+    sharedSync.requestInFlight = false;
+  }
 }
 
 async function renameWorkspacePage(pageId, nextTitle) {
@@ -547,6 +687,16 @@ async function handleWorkspaceListClick(event) {
     return;
   }
 
+  if (action === "archive-workspace") {
+    await archiveWorkspacePage(pageId);
+    return;
+  }
+
+  if (action === "restore-workspace") {
+    await restoreWorkspacePage(pageId);
+    return;
+  }
+
   if (action === "delete-workspace") {
     openWorkspaceDeleteModal(pageId);
   }
@@ -555,6 +705,7 @@ async function handleWorkspaceListClick(event) {
 function cacheElements() {
   ui.loginGate = document.querySelector("#loginGate");
   ui.loginForm = document.querySelector("#loginForm");
+  ui.loginEmailInput = document.querySelector("#loginEmailInput");
   ui.loginPasswordInput = document.querySelector("#loginPasswordInput");
   ui.toggleLoginPasswordBtn = document.querySelector("#toggleLoginPasswordBtn");
   ui.toggleLoginPasswordIcon = document.querySelector("#toggleLoginPasswordIcon");
@@ -562,8 +713,21 @@ function cacheElements() {
   ui.loginSubmitBtn = ui.loginForm?.querySelector('button[type="submit"]');
   ui.logoutBtn = document.querySelector("#logoutBtn");
   ui.newWorkspaceBtn = document.querySelector("#newWorkspaceBtn");
+  ui.toggleDeskModeBtn = document.querySelector("#toggleDeskModeBtn");
+  ui.accessUserBadge = document.querySelector("#accessUserBadge");
+  ui.workspaceStateBanner = document.querySelector("#workspaceStateBanner");
   ui.workspaceBadge = document.querySelector("#workspaceBadge");
   ui.workspaceList = document.querySelector("#workspaceList");
+  ui.activityLogList = document.querySelector("#activityLogList");
+  ui.conflictList = document.querySelector("#conflictList");
+  ui.deskSection = document.querySelector("#deskSection");
+  ui.deskPageFilter = document.querySelector("#deskPageFilter");
+  ui.deskBaqueFilter = document.querySelector("#deskBaqueFilter");
+  ui.deskClientFilter = document.querySelector("#deskClientFilter");
+  ui.deskCommandFilter = document.querySelector("#deskCommandFilter");
+  ui.deskIncludeArchivedInput = document.querySelector("#deskIncludeArchivedInput");
+  ui.deskSummary = document.querySelector("#deskSummary");
+  ui.deskParcelList = document.querySelector("#deskParcelList");
   ui.workspaceCreateModal = document.querySelector("#workspaceCreateModal");
   ui.workspaceCreateForm = document.querySelector("#workspaceCreateForm");
   ui.workspaceCreateKicker = document.querySelector("#workspaceCreateKicker");
@@ -652,6 +816,12 @@ function bindEvents() {
   ui.toggleLoginPasswordBtn?.addEventListener("click", toggleLoginPasswordVisibility);
   ui.logoutBtn.addEventListener("click", handleLogoutClick);
   ui.newWorkspaceBtn?.addEventListener("click", handleNewWorkspaceClick);
+  ui.toggleDeskModeBtn?.addEventListener("click", toggleDeskMode);
+  ui.deskPageFilter?.addEventListener("change", renderDeskView);
+  ui.deskBaqueFilter?.addEventListener("change", renderDeskView);
+  ui.deskClientFilter?.addEventListener("input", renderDeskView);
+  ui.deskCommandFilter?.addEventListener("input", renderDeskView);
+  ui.deskIncludeArchivedInput?.addEventListener("change", renderDeskView);
   ui.workspaceCreateForm?.addEventListener("submit", handleWorkspaceCreateSubmit);
   ui.closeWorkspaceCreateBtn?.addEventListener("click", closeWorkspaceCreateModal);
   ui.cancelWorkspaceCreateBtn?.addEventListener("click", closeWorkspaceCreateModal);
@@ -716,6 +886,7 @@ function bindEvents() {
 async function syncAccessGate() {
   refreshAccessRateLimit();
   if (!sharedStateStore?.getAccessSession) {
+    setAccessUser(null);
     setAppAccess(false);
     return false;
   }
@@ -723,6 +894,7 @@ async function syncAccessGate() {
   try {
     const session = await sharedStateStore.getAccessSession();
     const isGranted = Boolean(session);
+    setAccessUser(isGranted ? await sharedStateStore.getAccessUser?.() : null);
     setAppAccess(isGranted);
     if (isGranted) {
       await initializeSharedStateSync();
@@ -730,6 +902,7 @@ async function syncAccessGate() {
     return isGranted;
   } catch (error) {
     console.error("Session Supabase indisponible", error);
+    setAccessUser(null);
     setAppAccess(false);
     markSharedSyncOffline(error);
     return false;
@@ -746,6 +919,7 @@ async function handleLoginSubmit(event) {
       return;
     }
 
+    const typedEmail = normalizeFreeText(ui.loginEmailInput?.value || "").toLowerCase();
     const typedPassword = ui.loginPasswordInput.value.trim();
     if (!typedPassword) {
       ui.loginStatus.textContent = "Saisissez le code d'acces.";
@@ -759,10 +933,16 @@ async function handleLoginSubmit(event) {
       return;
     }
 
-    await sharedStateStore.signInWithPassword(typedPassword);
+    await sharedStateStore.signInWithPassword({
+      email: typedEmail,
+      password: typedPassword,
+    });
+    window.localStorage.setItem(ACCESS_EMAIL_STORAGE_KEY, typedEmail || "site-access@transbaus.local");
     resetAccessRateLimit();
+    setAccessUser(await sharedStateStore.getAccessUser?.());
     ui.loginStatus.textContent = "";
     ui.loginForm.reset();
+    hydrateLoginEmailInput();
     setAppAccess(true);
     await initializeSharedStateSync({ force: true });
     render();
@@ -796,6 +976,8 @@ async function handleLogoutClick() {
   sharedSync.initialized = false;
   sharedSyncMeta.updatedAt = "";
   workspaceLibrary.pages = [];
+  syncConflicts.splice(0, syncConflicts.length);
+  setAccessUser(null);
   hydrateState(createDefaultState());
   render();
   setAppAccess(false);
@@ -810,16 +992,54 @@ function setAppAccess(isGranted) {
     syncSharedStateBadge("required");
     syncLoginPasswordVisibility(false);
     ui.loginForm.reset();
+    hydrateLoginEmailInput();
     syncAccessRateLimitUi();
     if (!isAccessTemporarilyLocked()) {
-      ui.loginPasswordInput.focus();
+      ui.loginEmailInput?.focus();
     }
     return;
   }
 
   stopAccessLockCountdown();
   syncSharedStateBadge(sharedSync.online ? "shared" : "connecting");
+  if (deskMode) {
+    ui.deskClientFilter?.focus();
+    return;
+  }
+
+  if (isCurrentWorkspaceArchived()) {
+    ui.searchInput?.focus();
+    return;
+  }
+
   ui.routeCodeInput.focus();
+}
+
+function setAccessUser(user) {
+  accessContext.user = user || null;
+  if (!ui.accessUserBadge) {
+    return;
+  }
+
+  ui.accessUserBadge.textContent = accessContext.user?.label || "Utilisateur non connecte";
+}
+
+function getCurrentActor() {
+  return {
+    email: accessContext.user?.email || "",
+    label: accessContext.user?.label || accessContext.user?.email || "Utilisateur inconnu",
+  };
+}
+
+function buildActorMetadata(now = new Date().toISOString(), existing = null) {
+  const actor = getCurrentActor();
+  return {
+    createdByEmail: existing?.createdByEmail || actor.email,
+    createdByLabel: existing?.createdByLabel || actor.label,
+    updatedByEmail: actor.email,
+    updatedByLabel: actor.label,
+    updatedAt: now,
+  };
 }
 
 function loadAccessRateLimit() {
@@ -1033,6 +1253,35 @@ function normalizeSmallParcelScan(scan) {
     quantity,
     createdAt,
     updatedAt: normalizeStoredDate(scan?.updatedAt || createdAt, createdAt),
+    createdByEmail: normalizeFreeText(scan?.createdByEmail || "").toLowerCase(),
+    createdByLabel: normalizeFreeText(scan?.createdByLabel || ""),
+    updatedByEmail: normalizeFreeText(scan?.updatedByEmail || scan?.createdByEmail || "").toLowerCase(),
+    updatedByLabel: normalizeFreeText(scan?.updatedByLabel || scan?.createdByLabel || ""),
+  };
+}
+
+function normalizeActorEmailValue(value) {
+  return normalizeFreeText(value || "").toLowerCase();
+}
+
+function normalizeActorLabelValue(value) {
+  return normalizeFreeText(value || "");
+}
+
+function normalizeActivityLogEntry(entry) {
+  if (!entry?.id || !entry?.createdAt || !entry?.message) {
+    return null;
+  }
+
+  return {
+    id: String(entry.id),
+    action: normalizeFreeText(entry.action || "info") || "info",
+    entityType: normalizeFreeText(entry.entityType || "") || "systeme",
+    entityId: normalizeFreeText(entry.entityId || ""),
+    message: normalizeFreeText(entry.message || ""),
+    actorEmail: normalizeActorEmailValue(entry.actorEmail || ""),
+    actorLabel: normalizeActorLabelValue(entry.actorLabel || ""),
+    createdAt: normalizeStoredDate(entry.createdAt, new Date().toISOString()),
   };
 }
 
@@ -1049,6 +1298,10 @@ function normalizePersistedState(parsed) {
     validatedAt: normalizeStoredDate(baque.validatedAt || "", ""),
     createdAt: normalizeStoredDate(baque.createdAt, new Date().toISOString()),
     updatedAt: normalizeStoredDate(baque.updatedAt || baque.validatedAt || baque.createdAt, new Date().toISOString()),
+    createdByEmail: normalizeActorEmailValue(baque.createdByEmail || ""),
+    createdByLabel: normalizeActorLabelValue(baque.createdByLabel || ""),
+    updatedByEmail: normalizeActorEmailValue(baque.updatedByEmail || baque.createdByEmail || ""),
+    updatedByLabel: normalizeActorLabelValue(baque.updatedByLabel || baque.createdByLabel || ""),
   }));
 
   const availableBaqueIds = new Set(baques.map((baque) => baque.id));
@@ -1073,6 +1326,10 @@ function normalizePersistedState(parsed) {
       originBaqueLabel: String(parcel.originBaqueLabel || ""),
       createdAt: normalizeStoredDate(parcel.createdAt, new Date().toISOString()),
       updatedAt: normalizeStoredDate(parcel.updatedAt || parcel.createdAt, new Date().toISOString()),
+      createdByEmail: normalizeActorEmailValue(parcel.createdByEmail || ""),
+      createdByLabel: normalizeActorLabelValue(parcel.createdByLabel || ""),
+      updatedByEmail: normalizeActorEmailValue(parcel.updatedByEmail || parcel.createdByEmail || ""),
+      updatedByLabel: normalizeActorLabelValue(parcel.updatedByLabel || parcel.createdByLabel || ""),
     }))
     .filter((parcel) => parcel.routeCode || parcel.commandNumber || parcel.barcode || parcel.destination);
   const deliveryNotes = Array.isArray(parsed.deliveryNotes)
@@ -1090,6 +1347,13 @@ function normalizePersistedState(parsed) {
       .map((scan) => normalizeSmallParcelScan(scan))
       .filter(Boolean)
     : [];
+  const activityLog = Array.isArray(parsed.activityLog)
+    ? parsed.activityLog
+      .map((entry) => normalizeActivityLogEntry(entry))
+      .filter(Boolean)
+      .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
+      .slice(0, 250)
+    : [];
 
   return {
     baques: baques.length ? baques : fallbackState.baques,
@@ -1097,6 +1361,7 @@ function normalizePersistedState(parsed) {
     smallParcelScans,
     deliveryNotes,
     destinationRules,
+    activityLog,
   };
 }
 
@@ -1107,6 +1372,7 @@ function hydrateState(nextState) {
   state.smallParcelScans.splice(0, state.smallParcelScans.length, ...normalizedState.smallParcelScans);
   state.deliveryNotes.splice(0, state.deliveryNotes.length, ...normalizedState.deliveryNotes);
   state.destinationRules.splice(0, state.destinationRules.length, ...normalizedState.destinationRules);
+  state.activityLog.splice(0, state.activityLog.length, ...normalizedState.activityLog);
   return normalizedState;
 }
 
@@ -1125,6 +1391,7 @@ function createDefaultState() {
     smallParcelScans: [],
     deliveryNotes: [],
     destinationRules: [],
+    activityLog: [],
   };
 }
 
@@ -1246,8 +1513,9 @@ async function flushSharedStateSyncQueue() {
     const payload = await sharedStateStore.saveStateRecord(snapshotState());
     sharedSyncMeta.updatedAt = normalizeStoredDate(payload.updatedAt || "", new Date().toISOString());
     workspaceLibrary.pages = payload.pages || workspaceLibrary.pages;
+    pushSyncConflicts(payload.conflicts);
     syncCurrentWorkspaceFromLibrary();
-    renderWorkspacePages();
+    render();
     markSharedSyncOnline();
   } catch (error) {
     sharedSync.pendingPush = true;
@@ -1278,6 +1546,8 @@ async function pullSharedStateFromServer() {
       workspaceLibrary.pages = record.pages || workspaceLibrary.pages;
       syncCurrentWorkspaceFromLibrary();
       renderWorkspacePages();
+      renderWorkspaceStateBanner();
+      syncReadOnlyUi();
       return;
     }
 
@@ -1340,7 +1610,7 @@ function getSharedSyncErrorMessage(error) {
     return "La table Supabase n'existe pas encore. Relancez le script SQL puis rechargez la page.";
   }
 
-  if (code === "42703" || /created_at|title/.test(message)) {
+  if (code === "42703" || /created_at|title|archived_at|archived_by/.test(message)) {
     return "La structure Supabase est incomplete. Relancez le script SQL de migration puis rechargez la page.";
   }
 
@@ -1375,11 +1645,44 @@ function snapshotState() {
   return JSON.parse(JSON.stringify(state));
 }
 
+function appendActivityLog(action, entityType, entityId, message) {
+  const actor = getCurrentActor();
+  state.activityLog.unshift({
+    id: createId(),
+    action,
+    entityType,
+    entityId: String(entityId || ""),
+    message: normalizeFreeText(message || ""),
+    actorEmail: actor.email,
+    actorLabel: actor.label,
+    createdAt: new Date().toISOString(),
+  });
+  state.activityLog.splice(250);
+}
+
+function pushSyncConflicts(conflicts) {
+  if (!Array.isArray(conflicts) || !conflicts.length) {
+    return;
+  }
+
+  conflicts.forEach((conflict) => {
+    syncConflicts.unshift({
+      ...conflict,
+      id: conflict.id || createId(),
+    });
+  });
+  syncConflicts.splice(12);
+}
+
 function render() {
+  renderWorkspaceStateBanner();
   renderHeroStats();
   renderBaqueSelect();
   renderWorkspacePages();
   renderSmallParcelScans();
+  renderActivityLog();
+  renderConflictLog();
+  renderDeskView();
   renderDestinationRuleTargetOptions();
   renderDestinationRules();
   renderDestinationSummary();
@@ -1387,7 +1690,260 @@ function render() {
   safelyRenderSection(renderBaques, renderBaquesFallback);
   renderSearchResults();
   renderDeliveryNotes();
+  syncReadOnlyUi();
   applyCollapseStateToDom();
+}
+
+function renderWorkspaceStateBanner() {
+  if (!ui.workspaceStateBanner) {
+    return;
+  }
+
+  const workspace = getWorkspaceSummary(workspacePage.id);
+  const messages = [];
+  if (deskMode) {
+    messages.push("Mode bureau actif : cette vue est en lecture seule et permet de filtrer les colis par page, baque, client et commande.");
+  }
+  if (workspace?.archivedAt) {
+    const actor = workspace.archivedBy ? ` par ${workspace.archivedBy}` : "";
+    messages.push(`Page archivee le ${formatDate(workspace.archivedAt)}${actor}. Les modifications sont bloquees tant que la page n'est pas restauree.`);
+  }
+
+  if (!messages.length) {
+    ui.workspaceStateBanner.hidden = true;
+    ui.workspaceStateBanner.innerHTML = "";
+    return;
+  }
+
+  ui.workspaceStateBanner.hidden = false;
+  ui.workspaceStateBanner.innerHTML = messages
+    .map((message) => `<p class="field-help">${escapeHtml(message)}</p>`)
+    .join("");
+}
+
+function syncReadOnlyUi() {
+  const isReadOnly = isWorkspaceReadOnly();
+  document.body.classList.toggle("app-read-only", isReadOnly);
+  document.body.classList.toggle("app-desk-mode", deskMode);
+
+  const selectors = [
+    "#parcelForm input, #parcelForm select, #parcelForm textarea, #parcelForm button",
+    "#baqueForm input, #baqueForm button",
+    "#smallParcelForm input, #smallParcelForm button",
+    "#destinationRuleForm input, #destinationRuleForm select, #destinationRuleForm textarea, #destinationRuleForm button",
+    "#destinationRulesList input, #destinationRulesList select, #destinationRulesList textarea, #destinationRulesList button",
+    "#destinationSummary button",
+    "#baquesGrid input, #baquesGrid select, #baquesGrid button",
+    "#deliveryNotePanelBody button, #deliveryNoteInput",
+  ];
+
+  selectors.forEach((selector) => {
+    document.querySelectorAll(selector).forEach((element) => {
+      if ("disabled" in element) {
+        element.disabled = isReadOnly;
+      }
+    });
+  });
+}
+
+function renderActivityLog() {
+  if (!ui.activityLogList) {
+    return;
+  }
+
+  if (!state.activityLog.length) {
+    ui.activityLogList.innerHTML = `
+      <article class="empty-card">
+        <p class="empty-state">Aucune action enregistree pour cette page pour le moment.</p>
+      </article>
+    `;
+    return;
+  }
+
+  ui.activityLogList.innerHTML = state.activityLog
+    .slice(0, 20)
+    .map((entry) => `
+      <article class="document-card document-card--activity">
+        <div class="document-card__topline">
+          <p class="document-card__title">${escapeHtml(entry.message)}</p>
+          <span class="tag">${escapeHtml(entry.action)}</span>
+        </div>
+        <p class="document-card__meta document-card__meta--workspace">
+          ${escapeHtml(entry.actorLabel || entry.actorEmail || "Utilisateur inconnu")} • ${escapeHtml(formatDate(entry.createdAt))}
+        </p>
+      </article>
+    `)
+    .join("");
+}
+
+function renderConflictLog() {
+  if (!ui.conflictList) {
+    return;
+  }
+
+  if (!syncConflicts.length) {
+    ui.conflictList.innerHTML = `
+      <article class="empty-card">
+        <p class="empty-state">Aucun conflit de synchronisation detecte.</p>
+      </article>
+    `;
+    return;
+  }
+
+  ui.conflictList.innerHTML = syncConflicts
+    .slice(0, 8)
+    .map((conflict) => {
+      const keptLabel = conflict.resolvedTo === "local" ? "Version locale garde" : "Version distante gardee";
+      return `
+        <article class="document-card document-card--conflict">
+          <div class="document-card__topline">
+            <p class="document-card__title">${escapeHtml(conflict.entityLabel || conflict.entityId || "Element")}</p>
+            <span class="distribution-chip distribution-chip--alert">${escapeHtml(keptLabel)}</span>
+          </div>
+          <p class="document-card__meta document-card__meta--workspace">
+            ${escapeHtml(conflict.collectionKey)} • ${escapeHtml(formatDate(conflict.createdAt))}
+          </p>
+          <p class="document-card__meta document-card__meta--workspace">
+            Local : ${escapeHtml(conflict.localActor || "inconnu")} | Distant : ${escapeHtml(conflict.remoteActor || "inconnu")}
+          </p>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderDeskView() {
+  if (!ui.deskSection || !ui.deskSummary || !ui.deskParcelList) {
+    return;
+  }
+
+  ui.deskSection.hidden = !deskMode;
+  if (!deskMode) {
+    return;
+  }
+
+  const previousPageValue = ui.deskPageFilter?.value || "all";
+  const previousBaqueValue = ui.deskBaqueFilter?.value || "all";
+  const includeArchived = Boolean(ui.deskIncludeArchivedInput?.checked);
+  const pages = getDeskPages(includeArchived);
+
+  if (ui.deskPageFilter) {
+    ui.deskPageFilter.innerHTML = [
+      `<option value="all">Toutes les pages</option>`,
+      ...pages.map((page) => `
+        <option value="${escapeAttribute(page.id)}">
+          ${escapeHtml(page.title)}${page.archivedAt ? " (archivee)" : ""}
+        </option>
+      `),
+    ].join("");
+    ui.deskPageFilter.value = pages.some((page) => page.id === previousPageValue) ? previousPageValue : "all";
+  }
+
+  const selectedPageId = ui.deskPageFilter?.value || "all";
+  const visiblePages = selectedPageId === "all"
+    ? pages
+    : pages.filter((page) => page.id === selectedPageId);
+  const deskParcels = collectDeskParcels(visiblePages);
+  const baqueNames = [...new Set(deskParcels.map((parcel) => parcel.baqueName).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right, "fr", { sensitivity: "base" }));
+
+  if (ui.deskBaqueFilter) {
+    ui.deskBaqueFilter.innerHTML = [
+      `<option value="all">Toutes les baques</option>`,
+      ...baqueNames.map((baqueName) => `<option value="${escapeAttribute(baqueName)}">${escapeHtml(baqueName)}</option>`),
+    ].join("");
+    ui.deskBaqueFilter.value = baqueNames.includes(previousBaqueValue) ? previousBaqueValue : "all";
+  }
+
+  const baqueFilter = ui.deskBaqueFilter?.value || "all";
+  const clientFilter = normalizeFreeText(ui.deskClientFilter?.value || "").toLowerCase();
+  const commandFilter = normalizeFreeText(ui.deskCommandFilter?.value || "").toLowerCase();
+  const filteredParcels = deskParcels.filter((parcel) => {
+    if (baqueFilter !== "all" && parcel.baqueName !== baqueFilter) {
+      return false;
+    }
+    if (clientFilter && !parcel.client.toLowerCase().includes(clientFilter)) {
+      return false;
+    }
+    if (commandFilter && !`${parcel.commandNumber} ${parcel.barcode}`.toLowerCase().includes(commandFilter)) {
+      return false;
+    }
+    return true;
+  });
+
+  ui.deskSummary.innerHTML = `
+    <span class="distribution-chip">${escapeHtml(String(visiblePages.length))} page${visiblePages.length > 1 ? "s" : ""}</span>
+    <span class="distribution-chip">${escapeHtml(String(filteredParcels.length))} colis visibles</span>
+    <span class="distribution-chip">${escapeHtml(String(filteredParcels.filter((parcel) => parcel.pageArchivedAt).length))} colis archives</span>
+  `;
+
+  if (!filteredParcels.length) {
+    ui.deskParcelList.innerHTML = `
+      <article class="empty-card">
+        <p class="empty-state">Aucun colis ne correspond aux filtres du mode bureau.</p>
+      </article>
+    `;
+    return;
+  }
+
+  ui.deskParcelList.innerHTML = filteredParcels
+    .sort((left, right) => new Date(right.updatedAt) - new Date(left.updatedAt))
+    .map((parcel) => `
+      <article class="document-card">
+        <div class="document-card__topline">
+          <p class="document-card__title">${escapeHtml(parcel.identifier)}</p>
+          <div class="document-card__badges">
+            <span class="status-badge">${escapeHtml(parcel.pageTitle)}</span>
+            ${parcel.pageArchivedAt ? `<span class="distribution-chip">Archivee</span>` : ""}
+          </div>
+        </div>
+        <div class="document-summary">
+          <span class="distribution-chip">${escapeHtml(parcel.baqueName || "Sans baque")}</span>
+          ${parcel.commandNumber ? `<span class="distribution-chip">${escapeHtml(parcel.commandNumber)}</span>` : ""}
+          ${parcel.client ? `<span class="distribution-chip">${escapeHtml(parcel.client)}</span>` : ""}
+        </div>
+        <p class="document-card__meta document-card__meta--workspace">
+          ${escapeHtml(parcel.destination || "Sans destination")} • Mise a jour ${escapeHtml(formatDate(parcel.updatedAt || parcel.createdAt))}
+        </p>
+      </article>
+    `)
+    .join("");
+}
+
+function getDeskPages(includeArchived) {
+  const knownPages = workspaceLibrary.pages.length
+    ? workspaceLibrary.pages
+    : [getWorkspaceSummary(workspacePage.id)].filter(Boolean);
+  const pages = knownPages.map((page) => (
+    page.id === workspacePage.id
+      ? { ...page, state: snapshotState() }
+      : page
+  ));
+
+  return includeArchived ? pages : pages.filter((page) => !page.archivedAt);
+}
+
+function collectDeskParcels(pages) {
+  return (Array.isArray(pages) ? pages : [])
+    .flatMap((page) => {
+      const pageState = page.id === workspacePage.id ? state : page.state;
+      const pageBaques = Array.isArray(pageState?.baques) ? pageState.baques : [];
+      const baqueMap = new Map(pageBaques.map((baque) => [baque.id, baque]));
+      return (Array.isArray(pageState?.parcels) ? pageState.parcels : []).map((parcel) => ({
+        id: parcel.id,
+        identifier: getParcelIdentifier(parcel),
+        commandNumber: parcel.commandNumber || "",
+        barcode: parcel.barcode || "",
+        client: parcel.client || "",
+        destination: getParcelDestinationDisplay(parcel),
+        baqueName: baqueMap.get(parcel.currentBaqueId)?.name || "Baque supprimee",
+        updatedAt: parcel.updatedAt || parcel.createdAt,
+        createdAt: parcel.createdAt || "",
+        pageId: page.id,
+        pageTitle: page.title,
+        pageArchivedAt: page.archivedAt || "",
+      }));
+    });
 }
 
 function renderWorkspacePages() {
@@ -1402,12 +1958,25 @@ function renderWorkspacePages() {
       title: workspacePage.title,
       createdAt: "",
       updatedAt: "",
+      archivedAt: "",
+      archivedBy: "",
       parcelsCount: state.parcels.length + getSmallParcelCountTotal(),
       baquesCount: state.baques.length,
+      state: snapshotState(),
     }];
 
-  ui.workspaceList.innerHTML = pages
-    .map((page) => {
+  const activePages = pages.filter((page) => !page.archivedAt);
+  const archivedPages = pages.filter((page) => page.archivedAt);
+  const renderPageGroup = (title, list) => {
+    if (!list.length) {
+      return "";
+    }
+
+    return `
+      <div class="workspace-group">
+        <p class="section-kicker">${escapeHtml(title)}</p>
+        <div class="document-list">
+          ${list.map((page) => {
       const isCurrent = page.id === workspacePage.id;
       const isPrimary = page.id === "global";
       const countBits = [
@@ -1417,13 +1986,20 @@ function renderWorkspacePages() {
       const statusBits = [
         isPrimary ? `<span class="distribution-chip">Principale</span>` : "",
         isCurrent ? `<span class="status-badge">Page actuelle</span>` : "",
+        page.archivedAt ? `<span class="distribution-chip">Archivee</span>` : "",
       ].filter(Boolean);
       const managementButtons = [
         !isCurrent
-          ? `<a class="btn btn--secondary document-card__action document-card__action--workspace" href="${escapeAttribute(buildWorkspacePageUrl(page.id, page.title))}">Ouvrir</a>`
+          ? `<a class="btn btn--secondary document-card__action document-card__action--workspace" href="${escapeAttribute(deskMode ? buildDeskModeUrl(true, page.id, page.title) : buildWorkspacePageUrl(page.id, page.title))}">Ouvrir</a>`
           : "",
         !isPrimary
           ? `<button class="btn btn--secondary document-card__action document-card__action--workspace" type="button" data-workspace-action="rename-workspace" data-page-id="${escapeAttribute(page.id)}">Renommer</button>`
+          : "",
+        !isPrimary && !page.archivedAt
+          ? `<button class="btn btn--secondary document-card__action document-card__action--workspace" type="button" data-workspace-action="archive-workspace" data-page-id="${escapeAttribute(page.id)}">Archiver</button>`
+          : "",
+        !isPrimary && page.archivedAt
+          ? `<button class="btn btn--secondary document-card__action document-card__action--workspace" type="button" data-workspace-action="restore-workspace" data-page-id="${escapeAttribute(page.id)}">Restaurer</button>`
           : "",
         !isPrimary
           ? `<button class="btn btn--danger document-card__action document-card__action--workspace" type="button" data-workspace-action="delete-workspace" data-page-id="${escapeAttribute(page.id)}">Supprimer</button>`
@@ -1431,7 +2007,8 @@ function renderWorkspacePages() {
       ].filter(Boolean);
       const updatedAtLabel = page.updatedAt ? `Mise a jour ${escapeHtml(formatDate(page.updatedAt))}` : "";
       const createdAtLabel = !updatedAtLabel && page.createdAt ? `Creee le ${escapeHtml(formatDate(page.createdAt))}` : "";
-      const timestampLabel = updatedAtLabel || createdAtLabel;
+      const archivedAtLabel = page.archivedAt ? `Archivee le ${escapeHtml(formatDate(page.archivedAt))}` : "";
+      const timestampLabel = archivedAtLabel || updatedAtLabel || createdAtLabel;
 
       return `
         <article class="document-card document-card--workspace${isCurrent ? " document-card--active" : ""}">
@@ -1453,8 +2030,20 @@ function renderWorkspacePages() {
           </div>
         </article>
       `;
-    })
-    .join("");
+          }).join("")}
+        </div>
+      </div>
+    `;
+  };
+
+  ui.workspaceList.innerHTML = [
+    renderPageGroup("Pages actives", activePages),
+    renderPageGroup("Pages archivees", archivedPages),
+  ].join("") || `
+    <article class="empty-card">
+      <p class="empty-state">Aucune page enregistree pour le moment.</p>
+    </article>
+  `;
 }
 
 function safelyRenderSection(renderSection, fallbackRender) {
@@ -2359,6 +2948,7 @@ function buildStoredDeliveryNoteAnalysis(entries, analyzedAt = "") {
 
 function refreshStoredDeliveryNoteAnalyses() {
   const now = new Date().toISOString();
+  const actor = getCurrentActor();
   let updated = false;
 
   state.deliveryNotes.forEach((note) => {
@@ -2373,6 +2963,8 @@ function refreshStoredDeliveryNoteAnalyses() {
 
     note.analysis = nextAnalysis;
     note.updatedAt = now;
+    note.updatedByEmail = actor.email;
+    note.updatedByLabel = actor.label;
     updated = true;
   });
 
@@ -2618,11 +3210,17 @@ function deliveryNoteTemplate(note) {
 
 function handleParcelSubmit(event) {
   event.preventDefault();
+  if (!ensureWorkspaceEditable("Cette page ne peut plus recevoir de colis.")) {
+    return;
+  }
   upsertParcel();
 }
 
 function handleSmallParcelSubmit(event) {
   event.preventDefault();
+  if (!ensureWorkspaceEditable("Cette page archivee ne peut plus compter de petits colis.")) {
+    return;
+  }
   upsertSmallParcelScan();
 }
 
@@ -2642,6 +3240,9 @@ function handleSmallParcelListClick(event) {
 
 function handleBaqueSubmit(event) {
   event.preventDefault();
+  if (!ensureWorkspaceEditable("Cette page archivee ne peut plus modifier les baques.")) {
+    return;
+  }
 
   const name = ui.baqueNameInput.value.trim();
   const location = ui.baqueLocationInput.value.trim();
@@ -2659,8 +3260,13 @@ function handleBaqueSubmit(event) {
     validatedAt: "",
     createdAt: now,
     updatedAt: now,
+    createdByEmail: getCurrentActor().email,
+    createdByLabel: getCurrentActor().label,
+    updatedByEmail: getCurrentActor().email,
+    updatedByLabel: getCurrentActor().label,
   });
 
+  appendActivityLog("creation", "baque", name, `Baque "${name}" ajoutee.`);
   saveState();
   render();
   ui.baqueForm.reset();
@@ -2669,6 +3275,9 @@ function handleBaqueSubmit(event) {
 
 function handleDestinationRuleSubmit(event) {
   event.preventDefault();
+  if (!ensureWorkspaceEditable("Cette page archivee ne peut plus modifier les regles.")) {
+    return;
+  }
 
   const label = normalizeFreeText(ui.destinationRuleLabelInput.value);
   const matchMode = normalizeDestinationRuleMatchMode(ui.destinationRuleMatchModeSelect.value);
@@ -2689,8 +3298,13 @@ function handleDestinationRuleSubmit(event) {
     patterns,
     createdAt: now,
     updatedAt: now,
+    createdByEmail: getCurrentActor().email,
+    createdByLabel: getCurrentActor().label,
+    updatedByEmail: getCurrentActor().email,
+    updatedByLabel: getCurrentActor().label,
   });
 
+  appendActivityLog("creation", "regle", label, `Regle "${label}" ajoutee.`);
   saveState();
   render();
   ui.destinationRuleForm.reset();
@@ -2733,6 +3347,11 @@ function handleDestinationRulesClick(event) {
 }
 
 function handleDestinationRulesChange(event) {
+  if (!ensureWorkspaceEditable("Cette page archivee ne peut plus modifier les regles.")) {
+    render();
+    return;
+  }
+
   const input = event.target;
   const field = input.dataset.field;
   const ruleId = input.dataset.ruleId;
@@ -2775,12 +3394,19 @@ function handleDestinationRulesChange(event) {
   }
 
   rule.updatedAt = new Date().toISOString();
+  rule.updatedByEmail = getCurrentActor().email;
+  rule.updatedByLabel = getCurrentActor().label;
+  appendActivityLog("mise-a-jour", "regle", rule.id, `Regle "${rule.label}" mise a jour.`);
   saveState();
   render();
   showToast("Regle mise a jour.");
 }
 
 function handleBaqueGridClick(event) {
+  if (!ensureWorkspaceEditable("Cette page archivee est en lecture seule.")) {
+    return;
+  }
+
   const button = event.target.closest("[data-action]");
   if (!button) {
     return;
@@ -2806,6 +3432,11 @@ function handleBaqueGridClick(event) {
 }
 
 function handleBaqueGridChange(event) {
+  if (!ensureWorkspaceEditable("Cette page archivee est en lecture seule.")) {
+    render();
+    return;
+  }
+
   const input = event.target;
   const field = input.dataset.field;
   const baqueId = input.dataset.baqueId;
@@ -2828,6 +3459,9 @@ function handleBaqueGridChange(event) {
 
   baque[field] = nextValue;
   baque.updatedAt = new Date().toISOString();
+  baque.updatedByEmail = getCurrentActor().email;
+  baque.updatedByLabel = getCurrentActor().label;
+  appendActivityLog("mise-a-jour", "baque", baque.id, `Baque "${baque.name}" mise a jour.`);
   saveState();
   render();
   showToast("Baque mise a jour.");
@@ -2898,10 +3532,18 @@ function applyCollapseStateToDom() {
 }
 
 function openDeliveryNotePicker() {
+  if (!ensureWorkspaceEditable("Cette page archivee ne peut plus importer de PDF.")) {
+    return;
+  }
   ui.deliveryNoteInput.click();
 }
 
 async function handleDeliveryNoteImport(event) {
+  if (!ensureWorkspaceEditable("Cette page archivee ne peut plus importer de PDF.")) {
+    ui.deliveryNoteInput.value = "";
+    return;
+  }
+
   const file = event.target.files?.[0];
   if (!file) {
     return;
@@ -2915,12 +3557,17 @@ async function handleDeliveryNoteImport(event) {
   }
 
   const importedAt = new Date().toISOString();
+  const actor = getCurrentActor();
   const deliveryNote = {
     id: createId(),
     name: normalizeFreeText(file.name || "Bon-de-livraison.pdf"),
     size: Number(file.size || 0),
     importedAt,
     updatedAt: importedAt,
+    importedByEmail: actor.email,
+    importedByLabel: actor.label,
+    updatedByEmail: actor.email,
+    updatedByLabel: actor.label,
     analysis: null,
   };
 
@@ -2930,6 +3577,7 @@ async function handleDeliveryNoteImport(event) {
 
     await saveDeliveryNoteFile(deliveryNote.id, file);
     state.deliveryNotes.unshift(deliveryNote);
+    appendActivityLog("creation", "pdf", deliveryNote.id, `PDF "${deliveryNote.name}" importe.`);
     saveState();
     renderDeliveryNotes();
 
@@ -2956,6 +3604,10 @@ async function handleDeliveryNoteImport(event) {
 }
 
 async function handleDeliveryNoteListClick(event) {
+  if (!ensureWorkspaceEditable("Cette page archivee ne peut plus modifier les PDF.")) {
+    return;
+  }
+
   const button = event.target.closest("[data-action]");
   if (!(button instanceof HTMLElement)) {
     return;
@@ -3017,6 +3669,7 @@ async function handleDeliveryNoteListClick(event) {
   }
 
   state.deliveryNotes = state.deliveryNotes.filter((note) => note.id !== noteId);
+  appendActivityLog("suppression", "pdf", deliveryNote.id, `PDF "${deliveryNote.name}" supprime.`);
   saveState();
   renderDeliveryNotes();
   ui.deliveryNoteStatus.textContent = "";
@@ -3052,7 +3705,10 @@ async function analyzeDeliveryNote(noteId, providedFile = null) {
 
     deliveryNote.analysis = analysis;
     deliveryNote.updatedAt = analyzedAt;
+    deliveryNote.updatedByEmail = getCurrentActor().email;
+    deliveryNote.updatedByLabel = getCurrentActor().label;
 
+    appendActivityLog("mise-a-jour", "pdf", deliveryNote.id, `PDF "${deliveryNote.name}" analyse.`);
     saveState();
     renderDeliveryNotes();
     ui.deliveryNoteStatus.textContent = analysis.totalMissingCount
@@ -3075,6 +3731,8 @@ async function analyzeDeliveryNote(noteId, providedFile = null) {
       analyzedAt,
     };
     deliveryNote.updatedAt = analyzedAt;
+    deliveryNote.updatedByEmail = getCurrentActor().email;
+    deliveryNote.updatedByLabel = getCurrentActor().label;
     saveState();
     renderDeliveryNotes();
     ui.deliveryNoteStatus.textContent = errorMessage;
@@ -3171,7 +3829,15 @@ async function simulateDeliveryNoteParcels(noteId) {
     const analysis = buildStoredDeliveryNoteAnalysis(entries, analyzedAt);
     deliveryNote.analysis = analysis;
     deliveryNote.updatedAt = analyzedAt;
+    deliveryNote.updatedByEmail = getCurrentActor().email;
+    deliveryNote.updatedByLabel = getCurrentActor().label;
 
+    appendActivityLog(
+      "simulation",
+      "pdf",
+      deliveryNote.id,
+      `Simulation du PDF "${deliveryNote.name}" : ${createdCount} colis ajoutes, ${updatedCount} mis a jour.`,
+    );
     saveState();
     render();
 
@@ -3198,6 +3864,10 @@ async function simulateDeliveryNoteParcels(noteId) {
 }
 
 function openLabelCameraPicker() {
+  if (!ensureWorkspaceEditable("Cette page archivee est en lecture seule.")) {
+    return;
+  }
+
   if (ocr.busy) {
     return;
   }
@@ -3206,6 +3876,10 @@ function openLabelCameraPicker() {
 }
 
 function openLabelLibraryPicker() {
+  if (!ensureWorkspaceEditable("Cette page archivee est en lecture seule.")) {
+    return;
+  }
+
   if (ocr.busy) {
     return;
   }
@@ -3214,6 +3888,10 @@ function openLabelLibraryPicker() {
 }
 
 function openBarcodeCameraPicker() {
+  if (!ensureWorkspaceEditable("Cette page archivee est en lecture seule.")) {
+    return;
+  }
+
   if (scanner.importingBarcode) {
     return;
   }
@@ -3222,6 +3900,10 @@ function openBarcodeCameraPicker() {
 }
 
 function openBarcodeLibraryPicker() {
+  if (!ensureWorkspaceEditable("Cette page archivee est en lecture seule.")) {
+    return;
+  }
+
   if (scanner.importingBarcode) {
     return;
   }
@@ -3424,6 +4106,10 @@ async function processLabelFiles(files) {
 }
 
 async function openCaptureModal(mode) {
+  if (!ensureWorkspaceEditable("Cette page archivee est en lecture seule.")) {
+    return;
+  }
+
   if (captureSession.busy) {
     return;
   }
@@ -4105,6 +4791,10 @@ function applyParsedLabelData(parsed) {
 }
 
 function upsertParcel(scannedBarcode = "") {
+  if (!ensureWorkspaceEditable("Cette page archivee est en lecture seule.")) {
+    return false;
+  }
+
   const baqueId = ui.parcelBaqueSelect.value;
   const routeCode = normalizeRouteCode(ui.routeCodeInput.value);
   const destination = normalizeDestination(ui.destinationInput.value);
@@ -4145,6 +4835,8 @@ function upsertParcel(scannedBarcode = "") {
   const now = new Date().toISOString();
   const existing = findExistingParcel(state.parcels, normalizedParcelData);
   const commandNumber = getParcelCommandNumber(normalizedParcelData);
+  const actorMetadata = buildActorMetadata(now, existing);
+  const parcelLabel = getParcelIdentifier({ ...normalizedParcelData, commandNumber });
 
   if (existing) {
     const moved = existing.currentBaqueId !== baqueId;
@@ -4163,21 +4855,34 @@ function upsertParcel(scannedBarcode = "") {
     existing.packageIndex = normalizedParcelData.packageIndex;
     existing.currentBaqueId = baqueId;
     existing.updatedAt = now;
+    existing.createdByEmail = actorMetadata.createdByEmail;
+    existing.createdByLabel = actorMetadata.createdByLabel;
+    existing.updatedByEmail = actorMetadata.updatedByEmail;
+    existing.updatedByLabel = actorMetadata.updatedByLabel;
 
     invalidateBaqueValidations([previousBaqueId, baqueId]);
+    appendActivityLog(
+      moved ? "deplacement" : "mise-a-jour",
+      "colis",
+      existing.id,
+      moved
+        ? `Colis ${parcelLabel} deplace vers ${baque.name}.`
+        : `Colis ${parcelLabel} mis a jour.`,
+    );
     saveState();
     render();
     clearParcelForm();
     showToast(
       moved
-        ? `Colis ${getParcelIdentifier(normalizedParcelData)} deplace vers ${baque.name}.`
-        : `Colis ${getParcelIdentifier(normalizedParcelData)} mis a jour.`,
+        ? `Colis ${parcelLabel} deplace vers ${baque.name}.`
+        : `Colis ${parcelLabel} mis a jour.`,
     );
     return true;
   }
 
+  const parcelId = createId();
   state.parcels.unshift({
-    id: createId(),
+    id: parcelId,
     barcode: normalizedParcelData.barcode,
     commandNumber,
     routeCode: normalizedParcelData.routeCode,
@@ -4195,16 +4900,21 @@ function upsertParcel(scannedBarcode = "") {
     originBaqueLabel: baque.name,
     createdAt: now,
     updatedAt: now,
+    createdByEmail: actorMetadata.createdByEmail,
+    createdByLabel: actorMetadata.createdByLabel,
+    updatedByEmail: actorMetadata.updatedByEmail,
+    updatedByLabel: actorMetadata.updatedByLabel,
   });
 
   invalidateBaqueValidation(baqueId);
+  appendActivityLog("creation", "colis", parcelId, `Colis ${parcelLabel} ajoute dans ${baque.name}.`);
   saveState();
   render();
   clearParcelForm();
   showToast(
     commandNumber
-      ? `Colis ${getParcelIdentifier({ ...normalizedParcelData, commandNumber })} ajoute dans ${baque.name}.`
-      : `Colis ${getParcelIdentifier(normalizedParcelData)} ajoute dans ${baque.name}. Il ne pourra pas etre compare au PDF sans numero de commande.`,
+      ? `Colis ${parcelLabel} ajoute dans ${baque.name}.`
+      : `Colis ${parcelLabel} ajoute dans ${baque.name}. Il ne pourra pas etre compare au PDF sans numero de commande.`,
   );
   return true;
 }
@@ -4229,6 +4939,10 @@ function clearParcelForm() {
 }
 
 function upsertSmallParcelScan(scannedCode = "") {
+  if (!ensureWorkspaceEditable("Cette page archivee ne peut plus compter de petits colis.")) {
+    return false;
+  }
+
   const normalizedCode = normalizeBarcode(scannedCode || ui.smallParcelBarcodeInput?.value || "");
   const quantity = clamp(Math.round(Number(ui.smallParcelQuantityInput?.value || 1)), 1, 99);
   const normalizedScan = normalizeSmallParcelScan({
@@ -4243,13 +4957,25 @@ function upsertSmallParcelScan(scannedCode = "") {
   }
 
   const now = new Date().toISOString();
+  const actorMetadata = buildActorMetadata(now);
+  const scanId = createId();
   state.smallParcelScans.unshift({
     ...normalizedScan,
-    id: createId(),
+    id: scanId,
     createdAt: now,
     updatedAt: now,
+    createdByEmail: actorMetadata.createdByEmail,
+    createdByLabel: actorMetadata.createdByLabel,
+    updatedByEmail: actorMetadata.updatedByEmail,
+    updatedByLabel: actorMetadata.updatedByLabel,
   });
 
+  appendActivityLog(
+    "creation",
+    "petit-colis",
+    scanId,
+    `${quantity} ${pluralize(quantity, "petit colis compte", "petits colis comptes")} pour la commande ${normalizedScan.commandNumber}.`,
+  );
   saveState();
   renderHeroStats();
   renderSmallParcelScans();
@@ -4272,6 +4998,10 @@ function clearSmallParcelForm() {
 }
 
 function deleteSmallParcelScan(scanId) {
+  if (!ensureWorkspaceEditable("Cette page archivee ne peut plus compter de petits colis.")) {
+    return;
+  }
+
   const scan = state.smallParcelScans.find((item) => item.id === scanId);
   if (!scan) {
     return;
@@ -4283,6 +5013,7 @@ function deleteSmallParcelScan(scanId) {
   }
 
   state.smallParcelScans = state.smallParcelScans.filter((item) => item.id !== scanId);
+  appendActivityLog("suppression", "petit-colis", scan.id, `Comptage petits colis ${scan.commandNumber} supprime.`);
   saveState();
   renderHeroStats();
   renderSmallParcelScans();
@@ -4291,6 +5022,10 @@ function deleteSmallParcelScan(scanId) {
 }
 
 function deleteBaque(baqueId) {
+  if (!ensureWorkspaceEditable("Cette page archivee est en lecture seule.")) {
+    return;
+  }
+
   if (state.baques.length === 1) {
     showToast("Vous devez garder au moins une baque.", "danger");
     return;
@@ -4307,19 +5042,36 @@ function deleteBaque(baqueId) {
   }
 
   const now = new Date().toISOString();
+  const actor = getCurrentActor();
   state.baques = state.baques.filter((item) => item.id !== baqueId);
   state.parcels = state.parcels.filter((parcel) => parcel.currentBaqueId !== baqueId);
   state.destinationRules = state.destinationRules.map((rule) => (
     rule.preferredBaqueId === baqueId
-      ? { ...rule, preferredBaqueId: "", updatedAt: now }
+      ? {
+        ...rule,
+        preferredBaqueId: "",
+        updatedAt: now,
+        updatedByEmail: actor.email,
+        updatedByLabel: actor.label,
+      }
       : rule
   ));
+  appendActivityLog(
+    "suppression",
+    "baque",
+    baqueId,
+    `Baque "${baque?.name || "Sans nom"}" supprimee avec ${parcelCount} colis.`,
+  );
   saveState();
   render();
   showToast("Baque supprimee.");
 }
 
 function deleteDestinationRule(ruleId) {
+  if (!ensureWorkspaceEditable("Cette page archivee est en lecture seule.")) {
+    return;
+  }
+
   const rule = getDestinationRuleById(ruleId);
   if (!rule) {
     return;
@@ -4330,12 +5082,17 @@ function deleteDestinationRule(ruleId) {
   }
 
   state.destinationRules = state.destinationRules.filter((item) => item.id !== ruleId);
+  appendActivityLog("suppression", "regle", rule.id, `Regle "${rule.label}" supprimee.`);
   saveState();
   render();
   showToast(`Regle "${rule.label}" supprimee.`);
 }
 
 function toggleBaqueValidation(baqueId) {
+  if (!ensureWorkspaceEditable("Cette page archivee est en lecture seule.")) {
+    return;
+  }
+
   const baque = getBaqueById(baqueId);
   if (!baque) {
     return;
@@ -4343,7 +5100,8 @@ function toggleBaqueValidation(baqueId) {
 
   if (baque.validatedAt) {
     baque.validatedAt = "";
-    baque.updatedAt = new Date().toISOString();
+    Object.assign(baque, buildActorMetadata(new Date().toISOString(), baque));
+    appendActivityLog("mise-a-jour", "baque", baque.id, `Validation retiree pour ${baque.name}.`);
     saveState();
     render();
     showToast(`Validation retiree pour ${baque.name}.`);
@@ -4351,7 +5109,8 @@ function toggleBaqueValidation(baqueId) {
   }
 
   baque.validatedAt = new Date().toISOString();
-  baque.updatedAt = baque.validatedAt;
+  Object.assign(baque, buildActorMetadata(baque.validatedAt, baque));
+  appendActivityLog("mise-a-jour", "baque", baque.id, `${baque.name} marquee comme terminee.`);
   saveState();
   render();
   showToast(`${baque.name} marquee comme terminee.`);
@@ -4387,6 +5146,10 @@ function invalidateBaqueValidations(baqueIds) {
 }
 
 function deleteParcel(parcelId) {
+  if (!ensureWorkspaceEditable("Cette page archivee est en lecture seule.")) {
+    return;
+  }
+
   const parcel = state.parcels.find((item) => item.id === parcelId);
   if (!parcel) {
     return;
@@ -4398,12 +5161,17 @@ function deleteParcel(parcelId) {
 
   invalidateBaqueValidation(parcel.currentBaqueId);
   state.parcels = state.parcels.filter((item) => item.id !== parcelId);
+  appendActivityLog("suppression", "colis", parcel.id, `Colis ${getParcelIdentifier(parcel)} supprime.`);
   saveState();
   render();
   showToast(`Colis ${getParcelIdentifier(parcel)} supprime.`);
 }
 
 function moveParcel(parcelId) {
+  if (!ensureWorkspaceEditable("Cette page archivee est en lecture seule.")) {
+    return;
+  }
+
   const parcel = state.parcels.find((item) => item.id === parcelId);
   if (!parcel) {
     return;
@@ -4432,14 +5200,19 @@ function moveParcel(parcelId) {
 
   const previousBaqueId = parcel.currentBaqueId;
   parcel.currentBaqueId = nextBaqueId;
-  parcel.updatedAt = new Date().toISOString();
+  Object.assign(parcel, buildActorMetadata(new Date().toISOString(), parcel));
   invalidateBaqueValidations([previousBaqueId, nextBaqueId]);
+  appendActivityLog("deplacement", "colis", parcel.id, `Colis ${getParcelIdentifier(parcel)} deplace vers ${nextBaque.name}.`);
   saveState();
   render();
   showToast(`Colis ${getParcelIdentifier(parcel)} deplace vers ${nextBaque.name}.`);
 }
 
 async function openScanner(target = "parcel") {
+  if (!ensureWorkspaceEditable("Cette page archivee est en lecture seule.")) {
+    return;
+  }
+
   if (typeof window.Html5QrcodeScanner === "undefined") {
     showToast("La librairie de scan n'a pas pu etre chargee.", "danger");
     return;
@@ -4744,6 +5517,10 @@ function normalizeDestinationRule(rule, options = {}) {
     patterns,
     createdAt: normalizeStoredDate(rule.createdAt || "", new Date().toISOString()),
     updatedAt: normalizeStoredDate(rule.updatedAt || rule.createdAt || "", new Date().toISOString()),
+    createdByEmail: normalizeActorEmailValue(rule.createdByEmail || ""),
+    createdByLabel: normalizeActorLabelValue(rule.createdByLabel || ""),
+    updatedByEmail: normalizeActorEmailValue(rule.updatedByEmail || rule.createdByEmail || ""),
+    updatedByLabel: normalizeActorLabelValue(rule.updatedByLabel || rule.createdByLabel || ""),
   };
 }
 
@@ -4789,6 +5566,7 @@ function upsertSimulatedParcel(parcelData, baqueId) {
   const now = new Date().toISOString();
   const existing = findExistingParcel(state.parcels, normalizedParcelData);
   if (existing) {
+    const actorMetadata = buildActorMetadata(now, existing);
     const previousBaqueId = existing.currentBaqueId;
     existing.barcode = normalizedParcelData.barcode;
     existing.commandNumber = commandNumber;
@@ -4804,6 +5582,10 @@ function upsertSimulatedParcel(parcelData, baqueId) {
     existing.packageIndex = normalizedParcelData.packageIndex;
     existing.currentBaqueId = baqueId;
     existing.updatedAt = now;
+    existing.createdByEmail = actorMetadata.createdByEmail;
+    existing.createdByLabel = actorMetadata.createdByLabel;
+    existing.updatedByEmail = actorMetadata.updatedByEmail;
+    existing.updatedByLabel = actorMetadata.updatedByLabel;
 
     return {
       action: "updated",
@@ -4830,6 +5612,10 @@ function upsertSimulatedParcel(parcelData, baqueId) {
     originBaqueLabel: baque.name,
     createdAt: now,
     updatedAt: now,
+    createdByEmail: getCurrentActor().email,
+    createdByLabel: getCurrentActor().label,
+    updatedByEmail: getCurrentActor().email,
+    updatedByLabel: getCurrentActor().label,
   });
 
   return {

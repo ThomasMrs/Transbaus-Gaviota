@@ -23,6 +23,10 @@ export function normalizeDeliveryNote(note) {
     size: Number(note.size || 0),
     importedAt,
     updatedAt: normalizeStoredDate(note.updatedAt || note.analysis?.analyzedAt || importedAt, importedAt),
+    importedByEmail: normalizeFreeText(note.importedByEmail || "").toLowerCase(),
+    importedByLabel: normalizeFreeText(note.importedByLabel || ""),
+    updatedByEmail: normalizeFreeText(note.updatedByEmail || note.importedByEmail || "").toLowerCase(),
+    updatedByLabel: normalizeFreeText(note.updatedByLabel || note.importedByLabel || ""),
     analysis: normalizeDeliveryNoteAnalysis(note.analysis),
   };
 }

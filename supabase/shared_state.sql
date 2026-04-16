@@ -3,6 +3,8 @@ create table if not exists public.shared_state (
   title text,
   payload jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default timezone('utc', now()),
+  archived_at timestamptz,
+  archived_by text,
   updated_at timestamptz not null default timezone('utc', now())
 );
 
@@ -11,6 +13,12 @@ alter table public.shared_state
 
 alter table public.shared_state
   add column if not exists created_at timestamptz not null default timezone('utc', now());
+
+alter table public.shared_state
+  add column if not exists archived_at timestamptz;
+
+alter table public.shared_state
+  add column if not exists archived_by text;
 
 alter table public.shared_state
   alter column payload set default '{}'::jsonb;
@@ -108,6 +116,7 @@ set
       else replace(id, '-', ' ')
     end
   ),
+  archived_by = nullif(pg_catalog.btrim(archived_by), ''),
   created_at = coalesce(created_at, updated_at, timezone('utc', now())),
   updated_at = coalesce(updated_at, created_at, timezone('utc', now()));
 
@@ -154,6 +163,6 @@ drop function if exists public.verify_site_access(text);
 drop table if exists private.app_access_config;
 
 -- Ensuite, creez dans Supabase Auth un utilisateur partage :
--- email    : site-access@transbaus.local
+-- email    : site-access@transbaus.local ou un email d'equipe
 -- password : votre code d'acces du site
 -- email confirmation desactivee ou utilisateur deja confirme

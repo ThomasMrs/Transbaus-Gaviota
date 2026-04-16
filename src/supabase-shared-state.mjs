@@ -9,6 +9,7 @@ const APP_STATE_COLLECTION_KEYS = [
   "smallParcelScans",
   "deliveryNotes",
   "destinationRules",
+  "activityLog",
 ];
 
 export function createSharedStateStore(options = {}) {
@@ -41,6 +42,15 @@ export function createSharedStateStore(options = {}) {
       return data.session || null;
     },
 
+    async getAccessUser() {
+      const { data, error } = await client.auth.getUser();
+      if (error) {
+        throw error;
+      }
+
+      return normalizeAccessUser(data.user || null);
+    },
+
     subscribeAccessState(listener) {
       const callback = typeof listener === "function" ? listener : () => {};
       const {
@@ -57,10 +67,15 @@ export function createSharedStateStore(options = {}) {
       };
     },
 
-    async signInWithPassword(password) {
+    async signInWithPassword(credentials) {
+      const email = normalizeAccessEmail(
+        typeof credentials === "string"
+          ? ""
+          : credentials?.email || "",
+      ) || SUPABASE_ACCESS_EMAIL;
       const { data, error } = await client.auth.signInWithPassword({
-        email: SUPABASE_ACCESS_EMAIL,
-        password: String(password || ""),
+        email,
+        password: String(typeof credentials === "string" ? credentials : credentials?.password || ""),
       });
 
       if (error) {
@@ -96,11 +111,12 @@ export function createSharedStateStore(options = {}) {
     async saveStateRecord(payload) {
       const incomingState = normalizeAppStatePayload(payload);
       const currentRecord = await fetchPageRecord(client, pageId);
-      const mergedState = mergeAppStates(
+      const mergedResult = mergeAppStatesDetailed(
         normalizeAppStatePayload(currentRecord?.payload),
         incomingState,
         lastFetchedState,
       );
+      const mergedState = mergedResult.state;
       const fallbackUpdatedAt = new Date().toISOString();
       const updatedAt = await upsertPageRecord(client, {
         id: pageId,
@@ -114,6 +130,7 @@ export function createSharedStateStore(options = {}) {
       return {
         updatedAt,
         pages: await fetchPages(client),
+        conflicts: mergedResult.conflicts,
       };
     },
 
@@ -176,13 +193,75 @@ export function createSharedStateStore(options = {}) {
         pages: await fetchPages(client),
       };
     },
+
+    async archivePage(targetPageId, actor = null) {
+      const normalizedPageId = normalizePageId(targetPageId);
+      if (normalizedPageId === DEFAULT_PAGE_ID) {
+        throw createWorkspaceError("workspace-primary-protected", "La page principale ne peut pas etre archivee.");
+      }
+
+      const existingRecord = await fetchPageRecord(client, normalizedPageId);
+      if (!existingRecord) {
+        throw createWorkspaceError("workspace-page-missing", "La page a archiver est introuvable.");
+      }
+
+      const fallbackUpdatedAt = new Date().toISOString();
+      const { error } = await client
+        .from(SHARED_STATE_TABLE)
+        .update({
+          archived_at: fallbackUpdatedAt,
+          archived_by: normalizeAccessEmail(actor?.email || "") || null,
+          updated_at: fallbackUpdatedAt,
+        })
+        .eq("id", normalizedPageId);
+
+      if (error) {
+        throw error;
+      }
+
+      return {
+        updatedAt: fallbackUpdatedAt,
+        pages: await fetchPages(client),
+      };
+    },
+
+    async restorePage(targetPageId) {
+      const normalizedPageId = normalizePageId(targetPageId);
+      if (normalizedPageId === DEFAULT_PAGE_ID) {
+        throw createWorkspaceError("workspace-primary-protected", "La page principale ne peut pas etre restauree.");
+      }
+
+      const existingRecord = await fetchPageRecord(client, normalizedPageId);
+      if (!existingRecord) {
+        throw createWorkspaceError("workspace-page-missing", "La page a restaurer est introuvable.");
+      }
+
+      const fallbackUpdatedAt = new Date().toISOString();
+      const { error } = await client
+        .from(SHARED_STATE_TABLE)
+        .update({
+          archived_at: null,
+          archived_by: null,
+          updated_at: fallbackUpdatedAt,
+        })
+        .eq("id", normalizedPageId);
+
+      if (error) {
+        throw error;
+      }
+
+      return {
+        updatedAt: fallbackUpdatedAt,
+        pages: await fetchPages(client),
+      };
+    },
   };
 }
 
 async function fetchPageRecord(client, pageId) {
   const { data, error } = await client
     .from(SHARED_STATE_TABLE)
-    .select("id, title, created_at, updated_at, payload")
+    .select("id, title, created_at, updated_at, archived_at, archived_by, payload")
     .eq("id", pageId)
     .maybeSingle();
 
@@ -199,6 +278,8 @@ async function fetchPageRecord(client, pageId) {
     title: normalizePageTitle(data.title || defaultPageTitle(data.id)),
     createdAt: String(data.created_at || ""),
     updatedAt: String(data.updated_at || ""),
+    archivedAt: String(data.archived_at || ""),
+    archivedBy: normalizeAccessEmail(data.archived_by || ""),
     payload: data.payload || null,
   };
 }
@@ -206,7 +287,7 @@ async function fetchPageRecord(client, pageId) {
 async function fetchPages(client) {
   const { data, error } = await client
     .from(SHARED_STATE_TABLE)
-    .select("id, title, created_at, updated_at, payload");
+    .select("id, title, created_at, updated_at, archived_at, archived_by, payload");
 
   if (error) {
     throw error;
@@ -220,11 +301,18 @@ async function fetchPages(client) {
         title: normalizePageTitle(row.title || defaultPageTitle(row.id)),
         createdAt: String(row.created_at || ""),
         updatedAt: String(row.updated_at || ""),
+        archivedAt: String(row.archived_at || ""),
+        archivedBy: normalizeAccessEmail(row.archived_by || ""),
         parcelsCount: state.parcels.length + countSmallParcelScans(state.smallParcelScans),
         baquesCount: state.baques.length,
+        state,
       };
     })
     .sort((left, right) => {
+      if (Boolean(left.archivedAt) !== Boolean(right.archivedAt)) {
+        return left.archivedAt ? 1 : -1;
+      }
+
       const rightTime = Date.parse(right.updatedAt || right.createdAt || "") || 0;
       const leftTime = Date.parse(left.updatedAt || left.createdAt || "") || 0;
       if (rightTime !== leftTime) {
@@ -279,6 +367,30 @@ function defaultPageTitle(pageId) {
   return normalizePageId(pageId) === DEFAULT_PAGE_ID ? "Page principale" : String(pageId || "").replace(/[-_]+/g, " ");
 }
 
+function normalizeAccessEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeAccessUser(user) {
+  if (!user?.id) {
+    return null;
+  }
+
+  const email = normalizeAccessEmail(user.email || "");
+  const label = String(
+    user.user_metadata?.display_name
+      || user.user_metadata?.name
+      || user.email
+      || user.id,
+  ).trim();
+
+  return {
+    id: String(user.id),
+    email,
+    label: label || email || String(user.id),
+  };
+}
+
 function isAppStatePayload(payload) {
   return Boolean(
     payload
@@ -298,6 +410,7 @@ function buildEmptyAppState() {
     smallParcelScans: [],
     deliveryNotes: [],
     destinationRules: [],
+    activityLog: [],
   };
 }
 
@@ -312,6 +425,7 @@ function normalizeAppStatePayload(payload) {
     smallParcelScans: normalizeEntityCollection(payload.smallParcelScans),
     deliveryNotes: normalizeEntityCollection(payload.deliveryNotes),
     destinationRules: normalizeEntityCollection(payload.destinationRules),
+    activityLog: normalizeEntityCollection(payload.activityLog),
   };
 }
 
@@ -326,23 +440,32 @@ function normalizeEntityCollection(items) {
 }
 
 function mergeAppStates(remoteState, localState, baseState) {
+  return mergeAppStatesDetailed(remoteState, localState, baseState).state;
+}
+
+function mergeAppStatesDetailed(remoteState, localState, baseState) {
   const normalizedRemote = normalizeAppStatePayload(remoteState);
   const normalizedLocal = normalizeAppStatePayload(localState);
   const normalizedBase = normalizeAppStatePayload(baseState);
 
-  return Object.fromEntries(
-    APP_STATE_COLLECTION_KEYS.map((key) => [
-      key,
-      mergeEntityCollection(normalizedRemote[key], normalizedLocal[key], normalizedBase[key]),
-    ]),
+  const conflicts = [];
+  const state = Object.fromEntries(
+    APP_STATE_COLLECTION_KEYS.map((key) => {
+      const merged = mergeEntityCollectionDetailed(key, normalizedRemote[key], normalizedLocal[key], normalizedBase[key]);
+      conflicts.push(...merged.conflicts);
+      return [key, merged.items];
+    }),
   );
+
+  return { state, conflicts };
 }
 
-function mergeEntityCollection(remoteItems, localItems, baseItems) {
+function mergeEntityCollectionDetailed(collectionKey, remoteItems, localItems, baseItems) {
   const remoteMap = toEntityMap(remoteItems);
   const localMap = toEntityMap(localItems);
   const baseMap = toEntityMap(baseItems);
   const mergedMap = new Map();
+  const conflicts = [];
   const allIds = new Set([
     ...remoteMap.keys(),
     ...localMap.keys(),
@@ -350,9 +473,12 @@ function mergeEntityCollection(remoteItems, localItems, baseItems) {
   ]);
 
   allIds.forEach((id) => {
-    const mergedEntity = resolveMergedEntity(remoteMap.get(id), localMap.get(id), baseMap.get(id));
-    if (mergedEntity) {
-      mergedMap.set(id, mergedEntity);
+    const resolved = resolveMergedEntityDetailed(collectionKey, id, remoteMap.get(id), localMap.get(id), baseMap.get(id));
+    if (resolved.entity) {
+      mergedMap.set(id, resolved.entity);
+    }
+    if (resolved.conflict) {
+      conflicts.push(resolved.conflict);
     }
   });
 
@@ -363,46 +489,92 @@ function mergeEntityCollection(remoteItems, localItems, baseItems) {
     ...remoteOrder.filter((id) => !localOrder.includes(id)),
   ];
 
-  return [
+  return {
+    items: [
     ...mergedOrder
       .map((id) => mergedMap.get(id))
       .filter(Boolean),
     ...[...mergedMap.entries()]
       .filter(([id]) => !mergedOrder.includes(id))
       .map((entry) => entry[1]),
-  ];
+    ],
+    conflicts,
+  };
 }
 
-function resolveMergedEntity(remoteEntity, localEntity, baseEntity) {
+function resolveMergedEntityDetailed(collectionKey, entityId, remoteEntity, localEntity, baseEntity) {
   if (!remoteEntity && !localEntity) {
-    return null;
+    return { entity: null, conflict: null };
   }
+
+  const localChanged = baseEntity
+    ? (!localEntity || hasEntityChangedSinceBase(localEntity, baseEntity))
+    : Boolean(localEntity);
+  const remoteChanged = baseEntity
+    ? (!remoteEntity || hasEntityChangedSinceBase(remoteEntity, baseEntity))
+    : Boolean(remoteEntity);
+  const hasDiverged = localChanged
+    && remoteChanged
+    && JSON.stringify(localEntity || null) !== JSON.stringify(remoteEntity || null);
+  let conflict = null;
 
   if (baseEntity) {
     if (!localEntity) {
-      return null;
+      if (hasDiverged) {
+        conflict = buildMergeConflict(collectionKey, entityId, remoteEntity, localEntity, "remote");
+      }
+      return {
+        entity: null,
+        conflict,
+      };
     }
 
     if (!remoteEntity) {
-      return hasEntityChangedSinceBase(localEntity, baseEntity) ? localEntity : null;
+      if (hasDiverged) {
+        conflict = buildMergeConflict(collectionKey, entityId, remoteEntity, localEntity, "local");
+      }
+      return {
+        entity: hasEntityChangedSinceBase(localEntity, baseEntity) ? localEntity : null,
+        conflict,
+      };
     }
   }
 
   if (!remoteEntity) {
-    return localEntity || null;
+    return {
+      entity: localEntity || null,
+      conflict,
+    };
   }
 
   if (!localEntity) {
-    return remoteEntity || null;
+    return {
+      entity: remoteEntity || null,
+      conflict,
+    };
   }
 
   const remoteTimestamp = getEntityTimestamp(remoteEntity);
   const localTimestamp = getEntityTimestamp(localEntity);
   if (remoteTimestamp && localTimestamp) {
-    return Date.parse(localTimestamp) >= Date.parse(remoteTimestamp) ? localEntity : remoteEntity;
+    const resolvedTo = Date.parse(localTimestamp) >= Date.parse(remoteTimestamp) ? "local" : "remote";
+    if (hasDiverged) {
+      conflict = buildMergeConflict(collectionKey, entityId, remoteEntity, localEntity, resolvedTo);
+    }
+    return {
+      entity: resolvedTo === "local" ? localEntity : remoteEntity,
+      conflict,
+    };
   }
 
-  return localEntity;
+  if (hasDiverged) {
+    conflict = buildMergeConflict(collectionKey, entityId, remoteEntity, localEntity, "local");
+  }
+
+  return {
+    entity: localEntity,
+    conflict,
+  };
 }
 
 function hasEntityChangedSinceBase(entity, baseEntity) {
@@ -421,6 +593,51 @@ function getEntityTimestamp(entity) {
   }
 
   return String(entity.updatedAt || entity.analyzedAt || entity.importedAt || entity.createdAt || "");
+}
+
+function buildMergeConflict(collectionKey, entityId, remoteEntity, localEntity, resolvedTo) {
+  return {
+    id: `${collectionKey}:${entityId}:${Date.now()}:${Math.random().toString(16).slice(2, 6)}`,
+    collectionKey,
+    entityId: String(entityId || localEntity?.id || remoteEntity?.id || ""),
+    entityLabel: getEntityLabel(localEntity || remoteEntity),
+    resolvedTo,
+    remoteUpdatedAt: getEntityTimestamp(remoteEntity),
+    localUpdatedAt: getEntityTimestamp(localEntity),
+    remoteActor: getEntityActor(remoteEntity),
+    localActor: getEntityActor(localEntity),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function getEntityActor(entity) {
+  if (!entity || typeof entity !== "object") {
+    return "";
+  }
+
+  return String(
+    entity.updatedByLabel
+      || entity.updatedByEmail
+      || entity.createdByLabel
+      || entity.createdByEmail
+      || "",
+  );
+}
+
+function getEntityLabel(entity) {
+  if (!entity || typeof entity !== "object") {
+    return "Element";
+  }
+
+  return String(
+    entity.label
+      || entity.name
+      || entity.commandNumber
+      || entity.barcode
+      || entity.title
+      || entity.id
+      || "Element",
+  );
 }
 
 function toEntityMap(items) {
@@ -448,5 +665,6 @@ function countSmallParcelScans(scans) {
 export const __testables = {
   buildEmptyAppState,
   mergeAppStates,
+  mergeAppStatesDetailed,
   normalizeAppStatePayload,
 };

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { __testables } from "../src/supabase-shared-state.mjs";
 
-const { buildEmptyAppState, mergeAppStates, normalizeAppStatePayload } = __testables;
+const { buildEmptyAppState, mergeAppStates, mergeAppStatesDetailed, normalizeAppStatePayload } = __testables;
 
 function createState(overrides = {}) {
   return normalizeAppStatePayload({
@@ -97,4 +97,66 @@ test("mergeAppStates keeps the newest version when the same entity changed remot
   const mergedState = mergeAppStates(remoteState, localState, baseState);
 
   assert.equal(mergedState.baques[0].name, "Baque distante");
+});
+
+test("normalizeAppStatePayload preserves activity log entries", () => {
+  const state = normalizeAppStatePayload({
+    ...buildEmptyAppState(),
+    activityLog: [
+      {
+        id: "log-1",
+        message: "Colis ajoute",
+        createdAt: "2026-04-16T08:00:00.000Z",
+      },
+    ],
+  });
+
+  assert.equal(state.activityLog.length, 1);
+  assert.equal(state.activityLog[0].id, "log-1");
+});
+
+test("mergeAppStatesDetailed reports a conflict when local and remote diverge on the same entity", () => {
+  const baseState = createState({
+    parcels: [
+      {
+        id: "p1",
+        commandNumber: "063619",
+        currentBaqueId: "b1",
+        createdAt: "2026-04-16T08:00:00.000Z",
+        updatedAt: "2026-04-16T08:00:00.000Z",
+      },
+    ],
+  });
+
+  const remoteState = createState({
+    parcels: [
+      {
+        id: "p1",
+        commandNumber: "063619",
+        currentBaqueId: "b2",
+        updatedByEmail: "remote@example.com",
+        createdAt: "2026-04-16T08:00:00.000Z",
+        updatedAt: "2026-04-16T08:06:00.000Z",
+      },
+    ],
+  });
+
+  const localState = createState({
+    parcels: [
+      {
+        id: "p1",
+        commandNumber: "063619",
+        currentBaqueId: "b3",
+        updatedByEmail: "local@example.com",
+        createdAt: "2026-04-16T08:00:00.000Z",
+        updatedAt: "2026-04-16T08:05:00.000Z",
+      },
+    ],
+  });
+
+  const merged = mergeAppStatesDetailed(remoteState, localState, baseState);
+
+  assert.equal(merged.state.parcels[0].currentBaqueId, "b2");
+  assert.equal(merged.conflicts.length, 1);
+  assert.equal(merged.conflicts[0].collectionKey, "parcels");
 });

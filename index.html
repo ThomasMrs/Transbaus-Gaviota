@@ -36,6 +36,17 @@
 
       <form id="loginForm" class="form-stack">
         <label class="field">
+          <span>Email d'acces</span>
+          <input
+            id="loginEmailInput"
+            type="email"
+            autocomplete="username"
+            placeholder="site-access@transbaus.local"
+            required
+          >
+        </label>
+
+        <label class="field">
           <span>Code d'acces</span>
           <div class="password-field">
             <input
@@ -110,7 +121,11 @@
       </div>
 
       <div class="brand-bar__actions">
+        <span id="accessUserBadge" class="status-badge status-badge--muted">Utilisateur non connecte</span>
         <span id="workspaceBadge" class="status-badge">Page principale</span>
+        <button id="toggleDeskModeBtn" class="btn btn--secondary" type="button">
+          Mode bureau
+        </button>
         <button id="newWorkspaceBtn" class="btn btn--secondary" type="button">
           Creer une page vierge
         </button>
@@ -161,7 +176,60 @@
       </aside>
     </header>
 
+    <section id="workspaceStateBanner" class="panel workspace-state-banner" hidden></section>
+
     <main class="content">
+      <section id="deskSection" class="section-block desk-section" hidden>
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Mode bureau</p>
+            <h2>Suivi en lecture seule</h2>
+          </div>
+        </div>
+
+        <p class="section-caption">
+          Visualisez tous les colis en temps reel, filtrez par page, baque, client ou commande, sans risque de modification.
+        </p>
+
+        <div class="desk-section__filters">
+          <label class="field">
+            <span>Page</span>
+            <select id="deskPageFilter"></select>
+          </label>
+
+          <label class="field">
+            <span>Baque</span>
+            <select id="deskBaqueFilter"></select>
+          </label>
+
+          <label class="field">
+            <span>Client</span>
+            <input
+              id="deskClientFilter"
+              type="search"
+              placeholder="Filtrer par client"
+            >
+          </label>
+
+          <label class="field">
+            <span>Commande / code</span>
+            <input
+              id="deskCommandFilter"
+              type="search"
+              placeholder="Filtrer par commande ou code"
+            >
+          </label>
+
+          <label class="field field--checkbox desk-section__checkbox">
+            <span>Afficher aussi les pages archivees</span>
+            <input id="deskIncludeArchivedInput" type="checkbox">
+          </label>
+        </div>
+
+        <div id="deskSummary" class="document-summary"></div>
+        <div id="deskParcelList" class="document-list desk-section__list"></div>
+      </section>
+
       <section class="dashboard-grid">
         <article class="panel panel--collapsible" data-collapsible-key="scanner">
           <div class="section-head">
@@ -560,6 +628,34 @@
             </p>
             <div id="workspaceList" class="document-list"></div>
           </div>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Suivi</p>
+              <h2>Journal d'activite</h2>
+            </div>
+          </div>
+
+          <p class="field-help">
+            Les principales actions de la page actuelle apparaissent ici avec l'utilisateur et l'heure.
+          </p>
+          <div id="activityLogList" class="document-list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Synchronisation</p>
+              <h2>Conflits detectes</h2>
+            </div>
+          </div>
+
+          <p class="field-help">
+            Si deux appareils modifient le meme element, la resolution retenue est affichee ici.
+          </p>
+          <div id="conflictList" class="document-list"></div>
         </article>
 
         <article class="panel panel--collapsible" data-collapsible-key="deliveryNote">

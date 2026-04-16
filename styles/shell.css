@@ -71,6 +71,10 @@
   justify-self: end;
 }
 
+.brand-bar__actions .status-badge {
+  max-width: 100%;
+}
+
 .brand-bar__logout {
   align-self: center;
 }
@@ -296,6 +300,11 @@
   font-weight: 800;
 }
 
+.status-badge--muted {
+  background: rgba(36, 78, 115, 0.08);
+  color: var(--text-soft);
+}
+
 .status-badge[data-sync-state="shared"] {
   background: rgba(175, 220, 205, 0.38);
   color: #175b46;
@@ -337,4 +346,22 @@
 .section-block--collapsible .collapsible-body {
   display: grid;
   gap: 16px;
+}
+
+.workspace-state-banner {
+  margin-top: 22px;
+  display: grid;
+  gap: 10px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 251, 253, 0.92)),
+    linear-gradient(145deg, rgba(154, 200, 235, 0.16), rgba(241, 179, 157, 0.08));
+}
+
+.workspace-state-banner .field-help {
+  font-size: 0.96rem;
+}
+
+.app-desk-mode .dashboard-grid,
+.app-desk-mode .section-block:not(.desk-section) {
+  display: none;
 }

@@ -4,6 +4,10 @@
     grid-template-columns: 1fr;
   }
 
+  .desk-section__filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .brand-bar {
     grid-template-columns: 1fr;
   }
@@ -72,6 +76,11 @@
   }
 
   .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .desk-section__filters,
+  .desk-section__list {
     grid-template-columns: 1fr;
   }
 
