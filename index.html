@@ -126,9 +126,14 @@
       <div class="brand-bar__actions">
         <span id="accessUserBadge" class="status-badge status-badge--muted">Utilisateur non connecte</span>
         <span id="workspaceBadge" class="status-badge">Page principale</span>
-        <button id="toggleDeskModeBtn" class="btn btn--secondary" type="button">
-          Mode bureau
-        </button>
+        <div class="view-switch" role="group" aria-label="Choix de la vue">
+          <button id="showTerrainModeBtn" class="btn btn--secondary view-switch__btn" type="button">
+            Terrain
+          </button>
+          <button id="toggleDeskModeBtn" class="btn btn--secondary view-switch__btn" type="button">
+            Bureau
+          </button>
+        </div>
         <button id="newWorkspaceBtn" class="btn btn--secondary" type="button">
           Creer une page vierge
         </button>
@@ -182,10 +187,10 @@
     <section id="workspaceStateBanner" class="panel workspace-state-banner" hidden></section>
 
     <main class="content">
-      <section id="deskSection" class="section-block desk-section" hidden>
+      <section id="deskSection" class="section-block desk-section" data-app-view="bureau" hidden>
         <div class="section-head">
           <div>
-            <p class="section-kicker">Mode bureau</p>
+            <p class="section-kicker">Bureau</p>
             <h2>Suivi en lecture seule</h2>
           </div>
         </div>
@@ -234,7 +239,7 @@
       </section>
 
       <section class="dashboard-grid">
-        <article class="panel panel--collapsible" data-collapsible-key="scanner">
+        <article class="panel panel--collapsible" data-collapsible-key="scanner" data-app-view="terrain">
           <div class="section-head">
             <div>
               <p class="section-kicker">Action rapide</p>
@@ -459,10 +464,10 @@
           </div>
         </article>
 
-        <article class="panel panel--collapsible" data-collapsible-key="baqueForm">
+        <article class="panel panel--collapsible" data-collapsible-key="baqueForm" data-app-view="terrain">
           <div class="section-head">
             <div>
-              <p class="section-kicker">Configuration</p>
+              <p class="section-kicker">Organisation</p>
               <h2>Ajouter une baque</h2>
             </div>
             <button
@@ -505,7 +510,7 @@
           </div>
         </article>
 
-        <article class="panel panel--collapsible" data-collapsible-key="smallParcels">
+        <article class="panel panel--collapsible" data-collapsible-key="smallParcels" data-app-view="terrain">
           <div class="section-head">
             <div>
               <p class="section-kicker">Scan rapide</p>
@@ -573,7 +578,7 @@
           </div>
         </article>
 
-        <article class="panel panel--collapsible" data-collapsible-key="search">
+        <article class="panel panel--collapsible" data-collapsible-key="search" data-app-view="bureau">
           <div class="section-head">
             <div>
               <p class="section-kicker">Recherche</p>
@@ -606,10 +611,10 @@
           </div>
         </article>
 
-        <article class="panel panel--collapsible" data-collapsible-key="savedPages">
+        <article class="panel panel--collapsible" data-collapsible-key="savedPages" data-app-view="bureau">
           <div class="section-head">
             <div>
-              <p class="section-kicker">Historique</p>
+              <p class="section-kicker">Bureau</p>
               <h2>Pages enregistrees</h2>
             </div>
             <button
@@ -633,10 +638,10 @@
           </div>
         </article>
 
-        <article class="panel panel--collapsible" data-collapsible-key="activityLog">
+        <article class="panel panel--collapsible" data-collapsible-key="activityLog" data-app-view="bureau">
           <div class="section-head">
             <div>
-              <p class="section-kicker">Suivi</p>
+              <p class="section-kicker">Bureau</p>
               <h2>Journal d'activite</h2>
             </div>
             <button
@@ -660,10 +665,10 @@
           </div>
         </article>
 
-        <article class="panel panel--collapsible" data-collapsible-key="conflicts">
+        <article class="panel panel--collapsible" data-collapsible-key="conflicts" data-app-view="bureau">
           <div class="section-head">
             <div>
-              <p class="section-kicker">Synchronisation</p>
+              <p class="section-kicker">Bureau</p>
               <h2>Conflits detectes</h2>
             </div>
             <button
@@ -687,10 +692,10 @@
           </div>
         </article>
 
-        <article class="panel panel--collapsible" data-collapsible-key="deliveryNote">
+        <article class="panel panel--collapsible" data-collapsible-key="deliveryNote" data-app-view="bureau">
           <div class="section-head">
             <div>
-              <p class="section-kicker">Documents</p>
+              <p class="section-kicker">Bureau</p>
               <h2>Bon de livraison PDF</h2>
             </div>
             <div class="section-head__actions">
@@ -733,7 +738,7 @@
         </article>
       </section>
 
-      <section class="section-block section-block--collapsible" data-collapsible-key="destinations">
+      <section class="section-block section-block--collapsible" data-collapsible-key="destinations" data-app-view="terrain">
         <div class="section-head">
           <div>
             <p class="section-kicker">Repartition</p>
@@ -821,7 +826,7 @@
         </div>
       </section>
 
-      <section class="section-block section-block--collapsible" data-collapsible-key="baques">
+      <section class="section-block section-block--collapsible" data-collapsible-key="baques" data-app-view="terrain">
         <div class="section-head">
           <div>
             <p class="section-kicker">Emplacements</p>

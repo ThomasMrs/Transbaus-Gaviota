@@ -4,6 +4,11 @@
     grid-template-columns: 1fr;
   }
 
+  .dashboard-grid > [data-app-view] {
+    grid-column: auto !important;
+    grid-row: auto !important;
+  }
+
   .desk-section__filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -22,8 +27,20 @@
     justify-content: flex-start;
   }
 
+  .view-switch {
+    width: 100%;
+  }
+
+  .view-switch__btn {
+    flex: 1 1 0;
+  }
+
   .brand-bar__actions .btn {
     width: 100%;
+  }
+
+  .brand-bar__actions .view-switch__btn {
+    width: auto;
   }
 
   .brand-mark--gaviota {
@@ -87,6 +104,10 @@
   .desk-section__filters,
   .desk-section__list {
     grid-template-columns: 1fr;
+  }
+
+  .desk-section {
+    padding: 18px;
   }
 
   .capture-stack {

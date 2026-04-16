@@ -202,7 +202,7 @@ function normalizeWorkspacePageId(value) {
 
 function syncWorkspacePageUi() {
   const titleSuffix = workspacePage.isPrimary ? "" : ` - ${workspacePage.title}`;
-  const deskSuffix = deskMode ? " - Mode bureau" : "";
+  const deskSuffix = deskMode ? " - Vue bureau" : "";
   document.title = `Le Baus du Tri${titleSuffix}${deskSuffix}`;
 
   if (ui.workspaceBadge) {
@@ -211,8 +211,14 @@ function syncWorkspacePageUi() {
       : `Page ${workspacePage.title}`;
   }
 
+  if (ui.showTerrainModeBtn) {
+    ui.showTerrainModeBtn.classList.toggle("is-active", !deskMode);
+    ui.showTerrainModeBtn.setAttribute("aria-pressed", String(!deskMode));
+  }
+
   if (ui.toggleDeskModeBtn) {
-    ui.toggleDeskModeBtn.textContent = deskMode ? "Quitter le mode bureau" : "Mode bureau";
+    ui.toggleDeskModeBtn.classList.toggle("is-active", deskMode);
+    ui.toggleDeskModeBtn.setAttribute("aria-pressed", String(deskMode));
   }
 }
 
@@ -266,8 +272,20 @@ function buildDeskModeUrl(isEnabled, pageId = workspacePage.id, title = workspac
   return url.toString();
 }
 
+function showTerrainMode() {
+  if (!deskMode) {
+    return;
+  }
+
+  window.location.assign(buildDeskModeUrl(false));
+}
+
 function toggleDeskMode() {
-  window.location.assign(buildDeskModeUrl(!deskMode));
+  if (deskMode) {
+    return;
+  }
+
+  window.location.assign(buildDeskModeUrl(true));
 }
 
 function hydrateLoginEmailInput() {
@@ -715,6 +733,7 @@ function cacheElements() {
   ui.loginSubmitBtn = ui.loginForm?.querySelector('button[type="submit"]');
   ui.logoutBtn = document.querySelector("#logoutBtn");
   ui.newWorkspaceBtn = document.querySelector("#newWorkspaceBtn");
+  ui.showTerrainModeBtn = document.querySelector("#showTerrainModeBtn");
   ui.toggleDeskModeBtn = document.querySelector("#toggleDeskModeBtn");
   ui.accessUserBadge = document.querySelector("#accessUserBadge");
   ui.workspaceStateBanner = document.querySelector("#workspaceStateBanner");
@@ -818,6 +837,7 @@ function bindEvents() {
   ui.toggleLoginPasswordBtn?.addEventListener("click", toggleLoginPasswordVisibility);
   ui.logoutBtn.addEventListener("click", handleLogoutClick);
   ui.newWorkspaceBtn?.addEventListener("click", handleNewWorkspaceClick);
+  ui.showTerrainModeBtn?.addEventListener("click", showTerrainMode);
   ui.toggleDeskModeBtn?.addEventListener("click", toggleDeskMode);
   ui.deskPageFilter?.addEventListener("change", renderDeskView);
   ui.deskBaqueFilter?.addEventListener("change", renderDeskView);
