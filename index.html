@@ -36,12 +36,13 @@
 
       <form id="loginForm" class="form-stack">
         <label class="field">
-          <span>Email d'acces</span>
+          <span>Identifiant</span>
           <input
             id="loginEmailInput"
-            type="email"
+            type="text"
+            autocapitalize="off"
             autocomplete="username"
-            placeholder="site-access@transbaus.local"
+            placeholder="site-access"
             required
           >
         </label>
@@ -104,20 +105,22 @@
 
   <div class="page-shell">
     <section class="brand-bar" aria-label="Marques">
-      <div class="brand-mark brand-mark--transbaus">
-        <img
-          class="brand-logo brand-logo--transbaus"
-          src="assets/transbaus-removebg-preview.png"
-          alt="TransBaus"
-        >
-      </div>
+      <div class="brand-bar__logos">
+        <div class="brand-mark brand-mark--transbaus">
+          <img
+            class="brand-logo brand-logo--transbaus"
+            src="assets/transbaus-removebg-preview.png"
+            alt="TransBaus"
+          >
+        </div>
 
-      <div class="brand-mark brand-mark--gaviota">
-        <img
-          class="brand-logo brand-logo--gaviota"
-          src="assets/gaviota-logo-official.svg"
-          alt="Gaviota"
-        >
+        <div class="brand-mark brand-mark--gaviota">
+          <img
+            class="brand-logo brand-logo--gaviota"
+            src="assets/gaviota-logo-official.svg"
+            alt="Gaviota"
+          >
+        </div>
       </div>
 
       <div class="brand-bar__actions">

@@ -274,7 +274,7 @@ function hydrateLoginEmailInput() {
   }
 
   const storedEmail = window.localStorage.getItem(ACCESS_EMAIL_STORAGE_KEY) || "";
-  ui.loginEmailInput.value = storedEmail || "site-access@transbaus.local";
+  ui.loginEmailInput.value = storedEmail || "site-access";
 }
 
 function openWorkspaceCreateModal() {
@@ -919,8 +919,14 @@ async function handleLoginSubmit(event) {
       return;
     }
 
-    const typedEmail = normalizeFreeText(ui.loginEmailInput?.value || "").toLowerCase();
+    const typedIdentifier = normalizeFreeText(ui.loginEmailInput?.value || "").toLowerCase();
     const typedPassword = ui.loginPasswordInput.value.trim();
+    if (!typedIdentifier) {
+      ui.loginStatus.textContent = "Saisissez votre identifiant.";
+      ui.loginEmailInput?.focus();
+      return;
+    }
+
     if (!typedPassword) {
       ui.loginStatus.textContent = "Saisissez le code d'acces.";
       ui.loginPasswordInput.focus();
@@ -934,10 +940,10 @@ async function handleLoginSubmit(event) {
     }
 
     await sharedStateStore.signInWithPassword({
-      email: typedEmail,
+      identifier: typedIdentifier,
       password: typedPassword,
     });
-    window.localStorage.setItem(ACCESS_EMAIL_STORAGE_KEY, typedEmail || "site-access@transbaus.local");
+    window.localStorage.setItem(ACCESS_EMAIL_STORAGE_KEY, typedIdentifier || "site-access");
     resetAccessRateLimit();
     setAccessUser(await sharedStateStore.getAccessUser?.());
     ui.loginStatus.textContent = "";

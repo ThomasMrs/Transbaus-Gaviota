@@ -1,6 +1,7 @@
 const SUPABASE_URL = "https://znbcnahjvtdndttqjpec.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_L7q8_g_9SavtGfkNlPjK6Q_imFwj6_N";
 const SUPABASE_ACCESS_EMAIL = "site-access@transbaus.local";
+const SUPABASE_ACCESS_DOMAIN = SUPABASE_ACCESS_EMAIL.split("@")[1] || "transbaus.local";
 const SHARED_STATE_TABLE = "shared_state";
 const DEFAULT_PAGE_ID = "global";
 const APP_STATE_COLLECTION_KEYS = [
@@ -68,11 +69,12 @@ export function createSharedStateStore(options = {}) {
     },
 
     async signInWithPassword(credentials) {
-      const email = normalizeAccessEmail(
+      const identifier = normalizeAccessIdentifier(
         typeof credentials === "string"
           ? ""
-          : credentials?.email || "",
-      ) || SUPABASE_ACCESS_EMAIL;
+          : credentials?.identifier || credentials?.email || "",
+      );
+      const email = resolveAccessEmail(identifier);
       const { data, error } = await client.auth.signInWithPassword({
         email,
         password: String(typeof credentials === "string" ? credentials : credentials?.password || ""),
@@ -371,22 +373,50 @@ function normalizeAccessEmail(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizeAccessIdentifier(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+}
+
+function resolveAccessEmail(identifier) {
+  const normalizedIdentifier = normalizeAccessIdentifier(identifier);
+  if (!normalizedIdentifier) {
+    return SUPABASE_ACCESS_EMAIL;
+  }
+
+  if (normalizedIdentifier.includes("@")) {
+    return normalizeAccessEmail(normalizedIdentifier);
+  }
+
+  return `${normalizedIdentifier}@${SUPABASE_ACCESS_DOMAIN}`;
+}
+
 function normalizeAccessUser(user) {
   if (!user?.id) {
     return null;
   }
 
   const email = normalizeAccessEmail(user.email || "");
+  const localIdentifier = email.split("@")[0] || "";
+  const identifier = normalizeAccessIdentifier(
+    user.user_metadata?.username
+      || user.user_metadata?.login
+      || localIdentifier,
+  );
   const label = String(
     user.user_metadata?.display_name
       || user.user_metadata?.name
-      || user.email
+      || identifier
+      || localIdentifier
       || user.id,
   ).trim();
 
   return {
     id: String(user.id),
     email,
+    identifier,
     label: label || email || String(user.id),
   };
 }

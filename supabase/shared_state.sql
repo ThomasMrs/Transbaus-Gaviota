@@ -163,6 +163,7 @@ drop function if exists public.verify_site_access(text);
 drop table if exists private.app_access_config;
 
 -- Ensuite, creez dans Supabase Auth un utilisateur partage :
--- email    : site-access@transbaus.local ou un email d'equipe
+-- email    : site-access@transbaus.local ou thomas@transbaus.local
 -- password : votre code d'acces du site
+-- sur le site, l'utilisateur tape seulement l'identifiant (exemple : site-access ou thomas)
 -- email confirmation desactivee ou utilisateur deja confirme

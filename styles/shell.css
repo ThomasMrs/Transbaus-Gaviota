@@ -52,7 +52,7 @@
 
 .brand-bar {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(240px, 0.85fr) auto;
+  grid-template-columns: minmax(420px, 560px) minmax(0, 1fr);
   gap: 16px;
   margin-bottom: 22px;
   padding: 14px;
@@ -63,12 +63,23 @@
   box-shadow: var(--shadow);
 }
 
+.brand-bar__logos {
+  display: grid;
+  grid-template-columns: minmax(200px, 280px) minmax(240px, 320px);
+  gap: 16px;
+  align-items: stretch;
+  min-width: 0;
+}
+
 .brand-bar__actions {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
   align-items: center;
+  align-content: center;
+  justify-content: flex-end;
   justify-self: end;
+  min-width: 0;
 }
 
 .brand-bar__actions .status-badge {
@@ -83,6 +94,7 @@
   display: flex;
   justify-content: center;
   min-height: 96px;
+  min-width: 0;
   padding: 14px 16px;
   border-radius: 18px;
   border: 1px solid rgba(36, 78, 115, 0.08);
@@ -362,6 +374,7 @@
 }
 
 .app-desk-mode .dashboard-grid,
+.app-desk-mode .hero,
 .app-desk-mode .section-block:not(.desk-section) {
   display: none;
 }

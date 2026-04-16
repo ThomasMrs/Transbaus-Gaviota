@@ -12,9 +12,14 @@
     grid-template-columns: 1fr;
   }
 
+  .brand-bar__logos {
+    grid-template-columns: 1fr;
+  }
+
   .brand-bar__actions {
     width: 100%;
     justify-self: stretch;
+    justify-content: flex-start;
   }
 
   .brand-bar__actions .btn {
