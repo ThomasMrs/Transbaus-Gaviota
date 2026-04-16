@@ -633,32 +633,58 @@
           </div>
         </article>
 
-        <article class="panel">
+        <article class="panel panel--collapsible" data-collapsible-key="activityLog">
           <div class="section-head">
             <div>
               <p class="section-kicker">Suivi</p>
               <h2>Journal d'activite</h2>
             </div>
+            <button
+              class="collapse-toggle"
+              type="button"
+              data-collapse-toggle
+              data-collapse-key="activityLog"
+              aria-expanded="true"
+              aria-label="Reduire la rubrique"
+              aria-controls="activityLogPanelBody"
+            >
+              -
+            </button>
           </div>
 
-          <p class="field-help">
-            Les principales actions de la page actuelle apparaissent ici avec l'utilisateur et l'heure.
-          </p>
-          <div id="activityLogList" class="document-list"></div>
+          <div id="activityLogPanelBody" class="collapsible-body">
+            <p class="field-help">
+              Les principales actions de la page actuelle apparaissent ici avec l'utilisateur et l'heure.
+            </p>
+            <div id="activityLogList" class="document-list"></div>
+          </div>
         </article>
 
-        <article class="panel">
+        <article class="panel panel--collapsible" data-collapsible-key="conflicts">
           <div class="section-head">
             <div>
               <p class="section-kicker">Synchronisation</p>
               <h2>Conflits detectes</h2>
             </div>
+            <button
+              class="collapse-toggle"
+              type="button"
+              data-collapse-toggle
+              data-collapse-key="conflicts"
+              aria-expanded="true"
+              aria-label="Reduire la rubrique"
+              aria-controls="conflictsPanelBody"
+            >
+              -
+            </button>
           </div>
 
-          <p class="field-help">
-            Si deux appareils modifient le meme element, la resolution retenue est affichee ici.
-          </p>
-          <div id="conflictList" class="document-list"></div>
+          <div id="conflictsPanelBody" class="collapsible-body">
+            <p class="field-help">
+              Si deux appareils modifient le meme element, la resolution retenue est affichee ici.
+            </p>
+            <div id="conflictList" class="document-list"></div>
+          </div>
         </article>
 
         <article class="panel panel--collapsible" data-collapsible-key="deliveryNote">

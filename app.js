@@ -65,6 +65,8 @@ const DEFAULT_COLLAPSE_STATE = {
   smallParcels: false,
   search: false,
   savedPages: false,
+  activityLog: false,
+  conflicts: false,
   deliveryNote: false,
   destinations: false,
   baques: false,
