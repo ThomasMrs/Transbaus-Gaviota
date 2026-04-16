@@ -4,6 +4,10 @@
   padding: 28px 0 48px;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 .login-gate {
   position: fixed;
   inset: 0;
