@@ -1707,10 +1707,8 @@ function renderWorkspaceStateBanner() {
 
   const workspace = getWorkspaceSummary(workspacePage.id);
   const messages = [];
-  if (deskMode) {
-    messages.push("Mode bureau actif : cette vue est en lecture seule et permet de filtrer les colis par page, baque, client et commande.");
-  }
-  if (workspace?.archivedAt) {
+
+  if (workspace?.archivedAt && !deskMode) {
     const actor = workspace.archivedBy ? ` par ${workspace.archivedBy}` : "";
     messages.push(`Page archivee le ${formatDate(workspace.archivedAt)}${actor}. Les modifications sont bloquees tant que la page n'est pas restauree.`);
   }
