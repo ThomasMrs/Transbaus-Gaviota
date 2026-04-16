@@ -334,6 +334,21 @@ body:not(.app-desk-mode) [data-collapsible-key="scanner"] .field-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.bureau-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.95fr);
+  gap: 20px;
+  margin-top: 22px;
+  align-items: start;
+}
+
+.bureau-layout__main,
+.bureau-layout__side {
+  display: grid;
+  gap: 20px;
+  align-content: start;
+}
+
 .section-block {
   margin-top: 22px;
 }
@@ -438,31 +453,6 @@ body:not(.app-desk-mode) [data-collapsible-key="scanner"] .field-grid {
 
 .workspace-state-banner .field-help {
   font-size: 0.96rem;
-}
-
-.app-desk-mode .dashboard-grid {
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  align-items: start;
-}
-
-.app-desk-mode [data-collapsible-key="search"] {
-  grid-column: 1 / span 4;
-}
-
-.app-desk-mode [data-collapsible-key="savedPages"] {
-  grid-column: 5 / span 8;
-}
-
-.app-desk-mode [data-collapsible-key="deliveryNote"] {
-  grid-column: 1 / span 8;
-}
-
-.app-desk-mode [data-collapsible-key="activityLog"] {
-  grid-column: 9 / span 4;
-}
-
-.app-desk-mode [data-collapsible-key="conflicts"] {
-  grid-column: 9 / span 4;
 }
 
 .app-desk-mode .panel[data-app-view="bureau"] {

@@ -577,7 +577,84 @@
             <div id="smallParcelList" class="document-list"></div>
           </div>
         </article>
+      </section>
 
+      <section class="bureau-layout" data-app-view="bureau">
+        <div class="bureau-layout__main">
+          <article class="panel panel--collapsible" data-collapsible-key="savedPages" data-app-view="bureau">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">Bureau</p>
+                <h2>Pages enregistrees</h2>
+              </div>
+              <button
+                class="collapse-toggle"
+                type="button"
+                data-collapse-toggle
+                data-collapse-key="savedPages"
+                aria-expanded="true"
+                aria-label="Reduire la rubrique"
+                aria-controls="savedPagesPanelBody"
+              >
+                -
+              </button>
+            </div>
+
+            <div id="savedPagesPanelBody" class="collapsible-body">
+              <p class="field-help">
+                Retrouvez ici les anciennes pages de travail et rouvrez-les quand vous voulez.
+              </p>
+              <div id="workspaceList" class="document-list"></div>
+            </div>
+          </article>
+
+          <article class="panel panel--collapsible" data-collapsible-key="deliveryNote" data-app-view="bureau">
+            <div class="section-head">
+              <div>
+                <p class="section-kicker">Bureau</p>
+                <h2>Bon de livraison PDF</h2>
+              </div>
+              <div class="section-head__actions">
+                <span class="status-badge">Preparation</span>
+                <button
+                  class="collapse-toggle"
+                  type="button"
+                  data-collapse-toggle
+                  data-collapse-key="deliveryNote"
+                  aria-expanded="true"
+                  aria-label="Reduire la rubrique"
+                  aria-controls="deliveryNotePanelBody"
+                >
+                  -
+                </button>
+              </div>
+            </div>
+
+            <div id="deliveryNotePanelBody" class="collapsible-body">
+              <div class="form-stack">
+                <p class="field-help">
+                  Importez un bon de livraison en PDF pour analyser les livraisons et comparer avec les colis deja enregistres.
+                </p>
+
+                <button id="importDeliveryNoteBtn" class="btn btn--secondary" type="button">
+                  Importer un PDF
+                </button>
+
+                <input
+                  id="deliveryNoteInput"
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  class="hidden-input"
+                >
+
+                <p id="deliveryNoteStatus" class="field-help"></p>
+                <div id="deliveryNoteList" class="document-list"></div>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div class="bureau-layout__side">
         <article class="panel panel--collapsible" data-collapsible-key="search" data-app-view="bureau">
           <div class="section-head">
             <div>
@@ -691,51 +768,7 @@
             <div id="conflictList" class="document-list"></div>
           </div>
         </article>
-
-        <article class="panel panel--collapsible" data-collapsible-key="deliveryNote" data-app-view="bureau">
-          <div class="section-head">
-            <div>
-              <p class="section-kicker">Bureau</p>
-              <h2>Bon de livraison PDF</h2>
-            </div>
-            <div class="section-head__actions">
-              <span class="status-badge">Preparation</span>
-              <button
-                class="collapse-toggle"
-                type="button"
-                data-collapse-toggle
-                data-collapse-key="deliveryNote"
-                aria-expanded="true"
-                aria-label="Reduire la rubrique"
-                aria-controls="deliveryNotePanelBody"
-              >
-                -
-              </button>
-            </div>
-          </div>
-
-          <div id="deliveryNotePanelBody" class="collapsible-body">
-            <div class="form-stack">
-              <p class="field-help">
-                Importez un bon de livraison en PDF pour analyser les livraisons et comparer avec les colis deja enregistres.
-              </p>
-
-              <button id="importDeliveryNoteBtn" class="btn btn--secondary" type="button">
-                Importer un PDF
-              </button>
-
-              <input
-                id="deliveryNoteInput"
-                type="file"
-                accept="application/pdf,.pdf"
-                class="hidden-input"
-              >
-
-              <p id="deliveryNoteStatus" class="field-help"></p>
-              <div id="deliveryNoteList" class="document-list"></div>
-            </div>
-          </div>
-        </article>
+        </div>
       </section>
 
       <section class="section-block section-block--collapsible" data-collapsible-key="destinations" data-app-view="terrain">

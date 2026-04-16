@@ -1,6 +1,7 @@
 @media (max-width: 1100px) {
   .hero,
-  .dashboard-grid {
+  .dashboard-grid,
+  .bureau-layout {
     grid-template-columns: 1fr;
   }
 
@@ -102,7 +103,8 @@
   }
 
   .desk-section__filters,
-  .desk-section__list {
+  .desk-section__list,
+  .bureau-layout {
     grid-template-columns: 1fr;
   }
 
