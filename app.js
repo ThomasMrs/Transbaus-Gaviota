@@ -439,6 +439,37 @@ function getWorkspaceSummary(pageId) {
   return null;
 }
 
+function getWorkspacePagesWithCurrentState() {
+  const pages = Array.isArray(workspaceLibrary.pages)
+    ? workspaceLibrary.pages.slice()
+    : [];
+  const currentPageSnapshot = {
+    id: workspacePage.id,
+    title: workspacePage.title,
+    createdAt: "",
+    updatedAt: "",
+    archivedAt: "",
+    archivedBy: "",
+    parcelsCount: state.parcels.length + getSmallParcelCountTotal(),
+    baquesCount: state.baques.length,
+    state: snapshotState(),
+  };
+  const currentIndex = pages.findIndex((page) => page.id === workspacePage.id);
+
+  if (currentIndex >= 0) {
+    pages[currentIndex] = {
+      ...pages[currentIndex],
+      title: workspacePage.title || pages[currentIndex].title,
+      parcelsCount: currentPageSnapshot.parcelsCount,
+      baquesCount: currentPageSnapshot.baquesCount,
+      state: currentPageSnapshot.state,
+    };
+    return pages;
+  }
+
+  return [currentPageSnapshot, ...pages];
+}
+
 function isCurrentWorkspaceArchived() {
   return Boolean(getWorkspaceSummary(workspacePage.id)?.archivedAt);
 }
@@ -1848,10 +1879,13 @@ function renderDeskView() {
     return;
   }
 
-  const previousPageValue = ui.deskPageFilter?.value || "all";
   const previousBaqueValue = ui.deskBaqueFilter?.value || "all";
   const includeArchived = Boolean(ui.deskIncludeArchivedInput?.checked);
   const pages = getDeskPages(includeArchived);
+  const defaultPageValue = pages.some((page) => page.id === workspacePage.id)
+    ? workspacePage.id
+    : "all";
+  const previousPageValue = ui.deskPageFilter?.value || defaultPageValue;
 
   if (ui.deskPageFilter) {
     ui.deskPageFilter.innerHTML = [
@@ -1862,7 +1896,9 @@ function renderDeskView() {
         </option>
       `),
     ].join("");
-    ui.deskPageFilter.value = pages.some((page) => page.id === previousPageValue) ? previousPageValue : "all";
+    ui.deskPageFilter.value = pages.some((page) => page.id === previousPageValue)
+      ? previousPageValue
+      : defaultPageValue;
   }
 
   const selectedPageId = ui.deskPageFilter?.value || "all";
@@ -1938,14 +1974,7 @@ function renderDeskView() {
 }
 
 function getDeskPages(includeArchived) {
-  const knownPages = workspaceLibrary.pages.length
-    ? workspaceLibrary.pages
-    : [getWorkspaceSummary(workspacePage.id)].filter(Boolean);
-  const pages = knownPages.map((page) => (
-    page.id === workspacePage.id
-      ? { ...page, state: snapshotState() }
-      : page
-  ));
+  const pages = getWorkspacePagesWithCurrentState();
 
   return includeArchived ? pages : pages.filter((page) => !page.archivedAt);
 }
@@ -1979,19 +2008,7 @@ function renderWorkspacePages() {
     return;
   }
 
-  const pages = workspaceLibrary.pages.length
-    ? workspaceLibrary.pages
-    : [{
-      id: workspacePage.id,
-      title: workspacePage.title,
-      createdAt: "",
-      updatedAt: "",
-      archivedAt: "",
-      archivedBy: "",
-      parcelsCount: state.parcels.length + getSmallParcelCountTotal(),
-      baquesCount: state.baques.length,
-      state: snapshotState(),
-    }];
+  const pages = getWorkspacePagesWithCurrentState();
 
   const activePages = pages.filter((page) => !page.archivedAt);
   const archivedPages = pages.filter((page) => page.archivedAt);
