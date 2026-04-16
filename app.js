@@ -1515,6 +1515,8 @@ async function initializeSharedStateSync(options = {}) {
     }
     sharedSyncMeta.updatedAt = record.updatedAt;
   } else if (record) {
+    hydrateState(createDefaultState());
+    sharedSyncMeta.updatedAt = "";
     if (!workspacePage.isPrimary) {
       sharedSync.pendingPush = true;
       await flushSharedStateSyncQueue();
@@ -1602,6 +1604,11 @@ async function pullSharedStateFromServer() {
   try {
     const record = await fetchSharedStateRecord();
     if (!record?.state) {
+      hydrateState(createDefaultState());
+      sharedSyncMeta.updatedAt = "";
+      workspaceLibrary.pages = record?.pages || workspaceLibrary.pages;
+      syncCurrentWorkspaceFromLibrary();
+      render();
       return;
     }
 
