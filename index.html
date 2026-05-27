@@ -24,7 +24,9 @@
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
   <script type="module" src="app.js"></script>
 </head>
-<body class="app-locked">
+<body>
+  <!-- Systeme de connexion desactive pour la version portfolio. -->
+  <template id="loginGateDisabled">
   <div id="loginGate" class="login-gate" aria-hidden="false">
     <div class="login-gate__backdrop"></div>
     <section class="login-panel" aria-labelledby="loginTitle">
@@ -102,6 +104,7 @@
       </form>
     </section>
   </div>
+  </template>
 
   <div class="page-shell">
     <section class="brand-bar" aria-label="Marques">
@@ -124,7 +127,7 @@
       </div>
 
       <div class="brand-bar__actions">
-        <span id="accessUserBadge" class="status-badge status-badge--muted">Utilisateur non connecte</span>
+        <span id="accessUserBadge" class="status-badge status-badge--muted">Mode demo</span>
         <span id="workspaceBadge" class="status-badge">Page principale</span>
         <div class="view-switch" role="group" aria-label="Choix de la vue">
           <button id="showTerrainModeBtn" class="btn btn--secondary view-switch__btn" type="button">
@@ -137,9 +140,12 @@
         <button id="newWorkspaceBtn" class="btn btn--secondary" type="button">
           Creer une page vierge
         </button>
-        <button id="logoutBtn" class="btn btn--secondary brand-bar__logout" type="button">
-          Verrouiller
-        </button>
+        <!-- Bouton de verrouillage desactive avec le systeme de connexion. -->
+        <template id="logoutButtonDisabled">
+          <button id="logoutBtn" class="btn btn--secondary brand-bar__logout" type="button">
+            Verrouiller
+          </button>
+        </template>
       </div>
     </section>
 

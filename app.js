@@ -58,6 +58,11 @@ const PDF_DB_NAME = "le-baus-du-tri-documents-v1";
 const PDF_STORE_NAME = "delivery-notes";
 const PDFJS_SCRIPT_URL = "vendor/pdf.min.js";
 const PDFJS_WORKER_URL = "vendor/pdf.worker.min.js";
+const DEMO_MODE = true;
+const DEMO_ACTOR = {
+  email: "demo@portfolio.local",
+  label: "Mode demo",
+};
 const DEFAULT_COLLAPSE_STATE = {
   flow: false,
   scanner: false,
@@ -76,6 +81,83 @@ const DEFAULT_BAQUES = [
   { name: "Baque 2", location: "Zone B" },
   { name: "Baque 3", location: "Zone C" },
   { name: "Baque 4", location: "Zone D" },
+];
+const DEFAULT_DEMO_PARCELS = [
+  {
+    baqueIndex: 0,
+    barcode: "063619001",
+    commandNumber: "063619",
+    routeCode: "R447500",
+    destination: "47500 Saint-Vite",
+    client: "Menuiserie Vidal",
+    description: "Systeme coffre aluminium",
+    routeLabel: "R4 TRANSBAUS 4 - Zone 47 Lot-et-Garonne",
+    reference: "BERNARD",
+    shippingDate: "25/03/2026",
+    weight: "49,41 Kg",
+    measuredDimensions: "220 x 80 x 15 cm",
+    packageIndex: "1/2",
+  },
+  {
+    baqueIndex: 2,
+    barcode: "063619002",
+    commandNumber: "063619",
+    routeCode: "R447500",
+    destination: "47500 Saint-Vite",
+    client: "Menuiserie Vidal",
+    description: "Systeme coffre aluminium",
+    routeLabel: "R4 TRANSBAUS 4 - Zone 47 Lot-et-Garonne",
+    reference: "BERNARD",
+    shippingDate: "25/03/2026",
+    weight: "38,20 Kg",
+    measuredDimensions: "180 x 65 x 14 cm",
+    packageIndex: "2/2",
+  },
+  {
+    baqueIndex: 1,
+    barcode: "084725001",
+    commandNumber: "084725",
+    routeCode: "R447301",
+    destination: "47300 Villeneuve-sur-Lot",
+    client: "Atelier Moreau",
+    description: "Stores screen zip",
+    routeLabel: "R4 TRANSBAUS 4 - Zone Villeneuve",
+    reference: "MOREAU",
+    shippingDate: "25/03/2026",
+    weight: "18,60 Kg",
+    measuredDimensions: "140 x 30 x 22 cm",
+    packageIndex: "1/1",
+  },
+  {
+    baqueIndex: 3,
+    barcode: "071248001",
+    commandNumber: "071248",
+    routeCode: "R447310",
+    destination: "47310 Roquefort",
+    client: "Habitat Sud Ouest",
+    description: "Coulisses et accessoires",
+    routeLabel: "R4 TRANSBAUS 4 - Zone Agen",
+    reference: "HSO",
+    shippingDate: "25/03/2026",
+    weight: "9,75 Kg",
+    measuredDimensions: "95 x 24 x 18 cm",
+    packageIndex: "1/1",
+  },
+  {
+    baqueIndex: 0,
+    barcode: "095410001",
+    commandNumber: "095410",
+    routeCode: "R447500",
+    destination: "47500 Fumel",
+    client: "SAS Renov Habitat",
+    description: "Tablier volet roulant",
+    routeLabel: "R4 TRANSBAUS 4 - Zone 47 Lot-et-Garonne",
+    reference: "RENOV",
+    shippingDate: "25/03/2026",
+    weight: "27,30 Kg",
+    measuredDimensions: "160 x 42 x 19 cm",
+    packageIndex: "1/1",
+  },
 ];
 
 const workspacePage = getWorkspacePageContext();
@@ -150,14 +232,18 @@ async function initializeApp() {
   syncWorkspacePageUi();
   clearLegacyLocalState();
   syncSharedStateBadge("required");
-  try {
-    sharedStateStore = createSharedStateStore({
-      pageId: workspacePage.id,
-      pageTitle: () => workspacePage.title,
-    });
-  } catch (error) {
-    console.error("Client Supabase indisponible", error);
-    markSharedSyncOffline(error);
+  if (DEMO_MODE) {
+    syncSharedStateBadge("demo");
+  } else {
+    try {
+      sharedStateStore = createSharedStateStore({
+        pageId: workspacePage.id,
+        pageTitle: () => workspacePage.title,
+      });
+    } catch (error) {
+      console.error("Client Supabase indisponible", error);
+      markSharedSyncOffline(error);
+    }
   }
   await syncAccessGate();
   render();
@@ -868,9 +954,9 @@ function cacheElements() {
 
 function bindEvents() {
   document.addEventListener("click", handleCollapseToggle);
-  ui.loginForm.addEventListener("submit", handleLoginSubmit);
+  ui.loginForm?.addEventListener("submit", handleLoginSubmit);
   ui.toggleLoginPasswordBtn?.addEventListener("click", toggleLoginPasswordVisibility);
-  ui.logoutBtn.addEventListener("click", handleLogoutClick);
+  ui.logoutBtn?.addEventListener("click", handleLogoutClick);
   ui.newWorkspaceBtn?.addEventListener("click", handleNewWorkspaceClick);
   ui.showTerrainModeBtn?.addEventListener("click", showTerrainMode);
   ui.toggleDeskModeBtn?.addEventListener("click", toggleDeskMode);
@@ -941,6 +1027,13 @@ function bindEvents() {
 }
 
 async function syncAccessGate() {
+  if (DEMO_MODE) {
+    setAccessUser(DEMO_ACTOR);
+    setAppAccess(true);
+    syncSharedStateBadge("demo");
+    return true;
+  }
+
   refreshAccessRateLimit();
   if (!sharedStateStore?.getAccessSession) {
     setAccessUser(null);
@@ -1048,13 +1141,15 @@ async function handleLogoutClick() {
 
 function setAppAccess(isGranted) {
   document.body.classList.toggle("app-locked", !isGranted);
-  ui.loginGate.setAttribute("aria-hidden", String(isGranted));
-  ui.logoutBtn.hidden = !isGranted;
+  ui.loginGate?.setAttribute("aria-hidden", String(isGranted));
+  if (ui.logoutBtn) {
+    ui.logoutBtn.hidden = DEMO_MODE || !isGranted;
+  }
 
   if (!isGranted) {
     syncSharedStateBadge("required");
     syncLoginPasswordVisibility(false);
-    ui.loginForm.reset();
+    ui.loginForm?.reset();
     hydrateLoginEmailInput();
     syncAccessRateLimitUi();
     if (!isAccessTemporarilyLocked()) {
@@ -1064,7 +1159,7 @@ function setAppAccess(isGranted) {
   }
 
   stopAccessLockCountdown();
-  syncSharedStateBadge(sharedSync.online ? "shared" : "connecting");
+  syncSharedStateBadge(DEMO_MODE ? "demo" : sharedSync.online ? "shared" : "connecting");
   if (deskMode) {
     ui.deskClientFilter?.focus();
     return;
@@ -1075,7 +1170,7 @@ function setAppAccess(isGranted) {
     return;
   }
 
-  ui.routeCodeInput.focus();
+  ui.routeCodeInput?.focus();
 }
 
 function setAccessUser(user) {
@@ -1171,6 +1266,10 @@ function registerFailedLoginAttempt() {
 }
 
 function syncAccessRateLimitUi() {
+  if (!ui.loginPasswordInput || !ui.loginSubmitBtn || !ui.loginStatus) {
+    return;
+  }
+
   refreshAccessRateLimit();
 
   const isLocked = isAccessTemporarilyLocked();
@@ -1199,8 +1298,8 @@ function startAccessLockCountdown() {
 
     if (!isAccessTemporarilyLocked()) {
       syncAccessRateLimitUi();
-      if (ui.loginGate.getAttribute("aria-hidden") !== "true") {
-        ui.loginPasswordInput.focus();
+      if (ui.loginGate?.getAttribute("aria-hidden") !== "true") {
+        ui.loginPasswordInput?.focus();
       }
       return;
     }
@@ -1441,21 +1540,116 @@ function hydrateState(nextState) {
 
 function createDefaultState() {
   const now = new Date().toISOString();
+  const baques = DEFAULT_BAQUES.map((baque) => ({
+    id: createId(),
+    name: baque.name,
+    location: baque.location,
+    validatedAt: "",
+    createdAt: now,
+    updatedAt: now,
+    createdByEmail: DEMO_ACTOR.email,
+    createdByLabel: DEMO_ACTOR.label,
+    updatedByEmail: DEMO_ACTOR.email,
+    updatedByLabel: DEMO_ACTOR.label,
+  }));
+
   return {
-    baques: DEFAULT_BAQUES.map((baque) => ({
-      id: createId(),
-      name: baque.name,
-      location: baque.location,
-      validatedAt: "",
+    baques,
+    parcels: buildDefaultDemoParcels(baques, now),
+    smallParcelScans: buildDefaultSmallParcelScans(now),
+    deliveryNotes: [],
+    destinationRules: buildDefaultDestinationRules(baques, now),
+    activityLog: buildDefaultActivityLog(now),
+  };
+}
+
+function buildDefaultDemoParcels(baques, now) {
+  return DEFAULT_DEMO_PARCELS
+    .map((parcel, index) => {
+      const { baqueIndex, ...parcelData } = parcel;
+      const baque = baques[baqueIndex] || baques[0];
+      if (!baque) {
+        return null;
+      }
+
+      return normalizeParcelData({
+        id: `demo-parcel-${index + 1}`,
+        ...parcelData,
+        currentBaqueId: baque.id,
+        originBaqueId: baque.id,
+        originBaqueLabel: baque.name,
+        createdAt: now,
+        updatedAt: now,
+        createdByEmail: DEMO_ACTOR.email,
+        createdByLabel: DEMO_ACTOR.label,
+        updatedByEmail: DEMO_ACTOR.email,
+        updatedByLabel: DEMO_ACTOR.label,
+      });
+    })
+    .filter(Boolean);
+}
+
+function buildDefaultSmallParcelScans(now) {
+  return [
+    {
+      id: "demo-small-parcel-1",
+      barcode: "074200",
+      commandNumber: "074200",
+      quantity: 3,
       createdAt: now,
       updatedAt: now,
-    })),
-    parcels: [],
-    smallParcelScans: [],
-    deliveryNotes: [],
-    destinationRules: [],
-    activityLog: [],
-  };
+      createdByEmail: DEMO_ACTOR.email,
+      createdByLabel: DEMO_ACTOR.label,
+      updatedByEmail: DEMO_ACTOR.email,
+      updatedByLabel: DEMO_ACTOR.label,
+    },
+  ];
+}
+
+function buildDefaultDestinationRules(baques, now) {
+  return [
+    {
+      id: "demo-rule-fumel",
+      label: "Tournee Fumel",
+      matchMode: "any",
+      preferredBaqueId: baques[0]?.id || "",
+      patterns: parseDestinationRulePatterns(["47500", "SAINT-VITE", "FUMEL"]),
+      createdAt: now,
+      updatedAt: now,
+      createdByEmail: DEMO_ACTOR.email,
+      createdByLabel: DEMO_ACTOR.label,
+      updatedByEmail: DEMO_ACTOR.email,
+      updatedByLabel: DEMO_ACTOR.label,
+    },
+    {
+      id: "demo-rule-villeneuve",
+      label: "Tournee Villeneuve",
+      matchMode: "any",
+      preferredBaqueId: baques[1]?.id || "",
+      patterns: parseDestinationRulePatterns(["47300", "VILLENEUVE"]),
+      createdAt: now,
+      updatedAt: now,
+      createdByEmail: DEMO_ACTOR.email,
+      createdByLabel: DEMO_ACTOR.label,
+      updatedByEmail: DEMO_ACTOR.email,
+      updatedByLabel: DEMO_ACTOR.label,
+    },
+  ];
+}
+
+function buildDefaultActivityLog(now) {
+  return [
+    {
+      id: "demo-activity-1",
+      action: "creation",
+      entityType: "systeme",
+      entityId: "demo",
+      message: "Jeu d'exemples charge pour la presentation portfolio.",
+      actorEmail: DEMO_ACTOR.email,
+      actorLabel: DEMO_ACTOR.label,
+      createdAt: now,
+    },
+  ];
 }
 
 function loadCollapseState() {
@@ -1480,6 +1674,11 @@ function saveCollapseState() {
 
 function saveState() {
   refreshStoredDeliveryNoteAnalyses();
+  if (DEMO_MODE) {
+    syncSharedStateBadge("demo");
+    return;
+  }
+
   queueSharedStateSync();
 }
 
@@ -1493,6 +1692,7 @@ function syncSharedStateBadge(mode) {
     offline: "BDD hors ligne",
     shared: "BDD partagee",
     required: "BDD requise",
+    demo: "Mode demo",
   };
 
   ui.syncStatusBadge.dataset.syncState = mode;
