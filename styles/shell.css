@@ -128,10 +128,6 @@
   align-items: flex-start;
 }
 
-.brand-mark--gaviota {
-  align-items: flex-end;
-}
-
 .brand-logo {
   display: block;
   width: auto;
@@ -141,10 +137,6 @@
 
 .brand-logo--transbaus {
   max-height: 44px;
-}
-
-.brand-logo--gaviota {
-  max-height: 56px;
 }
 
 .hero {

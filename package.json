@@ -1,7 +1,7 @@
 {
   "name": "transbaus-gaviota",
   "version": "1.0.0",
-  "description": "Application web de tri de colis pour TransBaus / Gaviota.",
+  "description": "Application web de tri de colis pour TransBaus.",
   "main": "server.cjs",
   "scripts": {
     "start": "node server.cjs",

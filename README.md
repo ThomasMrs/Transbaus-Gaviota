@@ -1,6 +1,6 @@
-# Transbaus-Gaviota
+# Transbaus
 
-Application web de tri de colis pour TransBaus / Gaviota.
+Application web de tri de colis pour TransBaus.
 
 Le site permet de scanner un code-barres ou une etiquette complete, de ranger chaque colis dans une baque, puis de retrouver rapidement son emplacement, sa destination et ses informations principales.
 

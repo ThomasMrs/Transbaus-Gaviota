@@ -47,10 +47,6 @@
   .brand-bar__actions .view-switch__btn {
     width: auto;
   }
-
-  .brand-mark--gaviota {
-    align-items: flex-start;
-  }
 }
 
 @media (max-width: 760px) {
@@ -159,8 +155,7 @@
     width: 100%;
   }
 
-  .brand-logo--transbaus,
-  .brand-logo--gaviota {
+  .brand-logo--transbaus {
     max-height: 42px;
   }
 
