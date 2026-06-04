@@ -1,5 +1,5 @@
 {
-  "name": "transbaus-gaviota",
+  "name": "transbaus",
   "version": "1.0.0",
   "description": "Application web de tri de colis pour TransBaus.",
   "main": "server.cjs",
@@ -12,16 +12,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ThomasMrs/Transbaus-Gaviota.git"
+    "url": "git+https://github.com/ThomasMrs/Transbaus.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/ThomasMrs/Transbaus-Gaviota/issues"
+    "url": "https://github.com/ThomasMrs/Transbaus/issues"
   },
-  "homepage": "https://github.com/ThomasMrs/Transbaus-Gaviota#readme",
+  "homepage": "https://thomasmrs.github.io/Transbaus/",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.2.0",
